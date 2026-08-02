@@ -35,7 +35,7 @@ const escapeHtml = (
 const getFrontendUrl = () => {
   const configuredUrl =
     process.env.FRONTEND_URL ||
-    "http://localhost:5173";
+    "https://hogenakkalhomestays.com/";
 
   return configuredUrl
     .split(",")[0]

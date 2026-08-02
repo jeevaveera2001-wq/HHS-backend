@@ -10,7 +10,7 @@ const getFrontendUrl = () => {
   const configuredFrontend =
     (
       process.env.FRONTEND_URL ||
-      "http://localhost:5173"
+      "https://hogenakkalhomestays.com/"
     )
       .split(",")[0]
       .trim();
