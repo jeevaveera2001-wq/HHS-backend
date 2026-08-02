@@ -72,7 +72,10 @@ const validateEnvironment = () => {
 const startServer = async () => {
   try {
     validateEnvironment();
-
+    console.log(
+      "+++++++++Environment variables validated successfully.+++++",
+       process.env.MONGO_URI,
+    );
     await mongoose.connect(
       process.env.MONGO_URI,
       {
