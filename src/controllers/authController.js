@@ -242,25 +242,16 @@ const notifyPasswordChanged = (
   );
 };
 
-const notifyEmailVerified = (
-  user
-) => {
-  sendEmailVerifiedEmail({
-    email:
-      user.email,
-
-    fullName:
-      user.fullName,
-  }).catch(
-    (error) => {
-      console.error(
-        "Verification confirmation email error:",
-        error.message
-      );
-    }
-  );
+const notifyEmailVerified = async (user) => {
+  try {
+    await sendEmailVerifiedEmail({
+      email: user.email,
+      fullName: user.fullName,
+    });
+  } catch (error) {
+    console.error("Verification confirmation email error:", error.message);
+  }
 };
-
 /* =====================================
    Register user
 ===================================== */
@@ -322,7 +313,7 @@ export const register = async (
         isVerified:
           false,
       });
-
+console.log("567897654rer467890")
     let verificationEmailSent =
       false;
 
@@ -334,7 +325,7 @@ export const register = async (
         await issueEmailVerificationToken(
           user
         );
-
+     console.log("Verification token issued:", verificationToken, "Expires in hours:", expiresInHours);
       const emailResult =
         await sendEmailVerificationEmail(
           {
@@ -350,7 +341,7 @@ export const register = async (
             expiresInHours,
           }
         );
-
+      console.log("=====Email verification result:", emailResult);
       verificationEmailSent =
         Boolean(
           emailResult.success
@@ -694,9 +685,7 @@ export const verifyEmail = async (
           user._id,
       });
 
-    notifyEmailVerified(
-      user
-    );
+    await notifyEmailVerified(user); // Add await here
 
     return res
       .status(200)

@@ -5,6 +5,7 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 
+
 /* =====================================
    Application routes
 ===================================== */
@@ -51,7 +52,7 @@ if (process.env.NODE_ENV === "production") {
 /* =====================================
    Security
 ===================================== */
-
+app.use(morgan('combined')); // Now it catches everything!
 app.disable("x-powered-by");
 
 app.use(
@@ -138,13 +139,6 @@ app.use(cors(corsOptions));
    Logging
 ===================================== */
 
-app.use(
-  morgan(
-    process.env.NODE_ENV === "production"
-      ? "combined"
-      : "dev"
-  )
-);
 
 /* =====================================
    Razorpay Webhook
