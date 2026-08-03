@@ -76,6 +76,8 @@ const getTransporter = () => {
         user,
         pass,
       },
+      logger: true, // MUST BE TRUE TO SEE SMTP LOGS
+    debug: true,  // MUST BE TRUE TO SEE SMTP LOGS
     });
    console.log(
     `SMTP transporter created successfully with host: ${host}, port: ${port}, user: ${user}`
@@ -490,12 +492,14 @@ export const sendEmailSafely =
     } catch (error) {
       console.error(
         "HHS email failed:",
-        error.message
+        error.message,
+        error
       );
 
       return {
         success: false,
         error: error.message,
+        fullError: error,
       };
     }
   };

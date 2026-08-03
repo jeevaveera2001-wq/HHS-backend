@@ -294,6 +294,7 @@ export const sendEmailVerificationEmail =
     fullName,
     token,
   }) => {
+    console.log("Sending verification email to:", email, "with token:", token, "and fullName:", fullName);
     if (
       !email ||
       !token
@@ -309,11 +310,11 @@ export const sendEmailVerificationEmail =
     const verificationUrl =
       `${getFrontendUrl()}/verify-email/` +
       encodeURIComponent(token);
-
+    console.log("Verification URL:", verificationUrl);
     const customerName =
       fullName?.trim() ||
       "HHS Guest";
-
+   console.log("Customer Name:", customerName);
     const text = [
       `Hello ${customerName},`,
       "",
@@ -326,7 +327,7 @@ export const sendEmailVerificationEmail =
       "",
       "If you did not create this account, you can ignore this email.",
     ].join("\n");
-
+    console.log("Email text content:", text);
     const html =
       createEmailTemplate({
         preview:
@@ -350,7 +351,7 @@ export const sendEmailVerificationEmail =
         footerMessage:
           "This verification link expires automatically and can only be used once. If you did not create this HHS account, you can safely ignore this email.",
       });
-
+    console.log("Email HTML content:", html);
     return sendEmailSafely({
       to: email,
 
@@ -421,14 +422,18 @@ export const sendEmailVerifiedEmail =
           "Thank you for choosing Hogenakkal Home Stays. You can now access your account and explore trusted stays near Hogenakkal Falls.",
       });
 
-    return sendEmailSafely({
-      to: email,
+      const emailResult = await sendEmailSafely({ to: email, subject: "Your HHS email is verified", text });
+console.log("Email Result:", emailResult); // Check if success is false here
+return res.status(200).json({ success: true });
 
-      subject:
-        "Your HHS email is verified",
+    // return sendEmailSafely({
+    //   to: email,
 
-      text,
+    //   subject:
+    //     "Your HHS email is verified",
 
-      html,
-    });
+    //   text,
+
+    //   html,
+    // });
   };
