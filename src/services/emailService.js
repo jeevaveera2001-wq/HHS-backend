@@ -47,13 +47,13 @@ const getTransporter = () => {
 
   const pass =
     process.env.SMTP_PASS?.trim();
-
+ console.log(`+++++++++++++++++SMTP configuration: host=${host}, user=${user}, pass=${pass ? "****" : "not set"}`);
   if (!host || !user || !pass) {
     throw new Error(
       "SMTP configuration is missing from the backend .env file."
     );
   }
-
+  console.log(`SMTP configuration: host=${host}, user=${user}, pass=${pass ? "****" : "not set"}`);
   if (transporter) {
     return transporter;
   }
@@ -62,7 +62,9 @@ const getTransporter = () => {
     Number(
       process.env.SMTP_PORT
     ) || 465;
-
+  console.log(
+    `Creating SMTP transporter with host: ${host}, port: ${port}, user: ${user}`
+  );
   transporter =
     nodemailer.createTransport({
       host,
@@ -75,7 +77,9 @@ const getTransporter = () => {
         pass,
       },
     });
-
+   console.log(
+    `SMTP transporter created successfully with host: ${host}, port: ${port}, user: ${user}`
+  );
   return transporter;
 };
 
