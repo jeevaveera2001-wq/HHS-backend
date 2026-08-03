@@ -437,17 +437,24 @@ export const sendEmailSafely =
     html,
   }) => {
     try {
+      console.log(
+        `Sending HHS email to: ${to}`
+      );
       if (!to?.trim()) {
         throw new Error(
           "Email recipient is missing."
         );
       }
-
+     console.log(
+        `Email subject: ${subject}`
+      );
       const fromAddress =
         process.env
           .MAIL_FROM_EMAIL?.trim() ||
         process.env.SMTP_USER?.trim();
-
+     console.log(
+        `Email from address: ${fromAddress}`
+      );
       const result =
         await getTransporter().sendMail({
           from: {
