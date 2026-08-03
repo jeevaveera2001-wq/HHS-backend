@@ -68,10 +68,7 @@ const getTransporter = () => {
       host,
       port,
 
-      secure: normalizeBoolean(
-        process.env.SMTP_SECURE,
-        port === 465
-      ),
+      secure: true,
 
       auth: {
         user,
