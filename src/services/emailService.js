@@ -1,6 +1,7 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-let transporter = null;
+// Initialize the Resend client using your API key from .env
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 /* =====================================
    Configuration helpers
@@ -10,43 +11,6 @@ const getFrontendUrl = () => {
   return (
     process.env.FRONTEND_URL || "https://hogenakkalhomestays.com/"
   ).replace(/\/+$/, "");
-};
-
-const getTransporter = () => {
-  if (transporter) {
-    return transporter;
-  }
-
-  const host = process.env.SMTP_HOST?.trim();
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS?.trim();
-  
-  // Default to 587 (Explicit TLS), which bypasses Render port-blocking issues better than 465
-  const port = Number(process.env.SMTP_PORT) || 587;
-
-  if (!host || !user || !pass) {
-    throw new Error("SMTP configuration is missing from the backend .env file.");
-  }
-
-  transporter = nodemailer.createTransport({
-    host,
-    port,
-    // MUST be false for port 587. Nodemailer will automatically upgrade the connection to TLS.
-    secure: port === 465, 
-    auth: {
-      user,
-      pass,
-    },
-    logger: true,
-    debug: true,
-    
-    // Critical for Render: Prevents the server from hanging indefinitely if the network drops
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-  });
-
-  return transporter;
 };
 
 /* =====================================
@@ -219,43 +183,56 @@ const getBookingDetails = (booking) => {
 };
 
 /* =====================================
-   Base email sender
+   Base email sender (Updated for Resend)
 ===================================== */
 
 export const sendEmailSafely = async ({ to, subject, text, html }) => {
   try {
     if (!to?.trim()) throw new Error("Email recipient is missing.");
 
-    const fromAddress = process.env.MAIL_FROM_EMAIL?.trim() || process.env.SMTP_USER?.trim();
+    // Fallback to Resend's testing email if env variable is missing
+    const fromEmail = process.env.MAIL_FROM_EMAIL?.trim() || "onboarding@resend.dev";
+    const fromName = process.env.MAIL_FROM_NAME?.trim() || "HHS - Hogenakkal Home Stay";
     
-    console.log(`Attempting to send email to: ${to.trim()}`);
+    // Resend requires the "From" field to be formatted as: "Name <email@domain.com>"
+    const fromFormatted = `${fromName} <${fromEmail}>`;
 
-    const result = await getTransporter().sendMail({
-      from: {
-        name: process.env.MAIL_FROM_NAME?.trim() || "HHS - Hogenakkal Home Stay",
-        address: fromAddress,
-      },
+    console.log(`Attempting to send email to: ${to.trim()} via Resend`);
+
+    // Using Resend SDK
+    const { data, error } = await resend.emails.send({
+      from: fromFormatted,
       to: to.trim(),
       subject,
-      text,
-      html,
-      replyTo: fromAddress,
+      text, // Plain text fallback
+      html, // HTML template
+      replyTo: fromEmail,
     });
 
-    console.log(`✅ Email sent successfully! Message ID: ${result.messageId}`);
+    // If the Resend API rejects the request (e.g. unverified domain)
+    if (error) {
+      console.log("========== RESEND API ERROR ==========");
+      console.log(JSON.stringify(error, null, 2));
+      console.log("======================================");
+      
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+
+    console.log(`✅ Email sent successfully via Resend! Message ID: ${data.id}`);
 
     return {
       success: true,
-      messageId: result.messageId,
+      messageId: data.id,
     };
   } catch (error) {
-    // Structured error logging for cloud platforms like Render
+    // Structured error logging for unexpected Javascript crashes
     console.log("========== EMAIL ERROR FATAL ==========");
     console.log(JSON.stringify({
       message: error.message,
-      code: error.code, 
-      command: error.command, 
-      response: error.response, 
+      stack: error.stack,
     }, null, 2));
     console.log("=======================================");
 
