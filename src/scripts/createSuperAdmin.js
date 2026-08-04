@@ -1,134 +1,46 @@
-import dotenv from "dotenv";
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 
-import User from "../models/User.js";
+// The correct, full connection string
+const MONGO_URI = "mongodb+srv://hogenakkalhomestays_db_user:Hacker123@hhs-db.e67t8um.mongodb.net/hhs?retryWrites=true&w=majority&appName=HHS-DB";
 
-dotenv.config();
-
-/* =====================================
-   Create or reset Super Admin
-===================================== */
-
-const createSuperAdmin = async () => {
+const setupAdmin = async () => {
   try {
-    const mongoUri =
-      process.env.MONGO_URI;
+    console.log("Connecting to database...");
+    await mongoose.connect(MONGO_URI);
+    console.log("✅ Connected to MongoDB Atlas");
 
-    const fullName =
-      process.env.SUPER_ADMIN_NAME
-        ?.trim();
+    // Access the database collection
+    const db = mongoose.connection.db;
+    const usersCollection = db.collection("users"); 
 
-    const email =
-      process.env.SUPER_ADMIN_EMAIL
-        ?.trim()
-        .toLowerCase();
-
-    const phone =
-      process.env.SUPER_ADMIN_PHONE
-        ?.trim();
-
-    const password =
-      process.env.SUPER_ADMIN_PASSWORD;
-
-    if (!mongoUri) {
-      throw new Error(
-        "MONGO_URI is missing from backend .env"
-      );
-    }
-
-    if (
-      !fullName ||
-      !email ||
-      !phone ||
-      !password
-    ) {
-      throw new Error(
-        "Super Admin environment variables are incomplete."
-      );
-    }
-
-    if (password.length < 8) {
-      throw new Error(
-        "Super Admin password must contain at least 8 characters."
-      );
-    }
-
-    await mongoose.connect(mongoUri);
-
-    console.log(
-      "MongoDB connected successfully."
+    // Find the user and update their role
+    const result = await usersCollection.updateOne(
+      { email: "hogenakkalhomestays@gmail.com" }, 
+      {
+        $set: {
+          role: "super_admin",
+          isVerified: true 
+        }
+      }
     );
 
-    const hashedPassword =
-      await bcrypt.hash(
-        password,
-        12
-      );
-
-    const existingUser =
-      await User.findOne({
-        email,
-      }).select("+password");
-
-    if (existingUser) {
-      existingUser.fullName =
-        fullName;
-
-      existingUser.phone =
-        phone;
-
-      existingUser.password =
-        hashedPassword;
-
-      existingUser.role =
-        "super_admin";
-
-      existingUser.isActive =
-        true;
-
-      existingUser.isVerified =
-        true;
-
-      await existingUser.save();
-
-      console.log(
-        "Existing account updated as Super Admin."
-      );
+    // Output the result
+    if (result.modifiedCount > 0) {
+      console.log("🎉 SUCCESS: User successfully upgraded to super_admin!");
+    } else if (result.matchedCount > 0) {
+      console.log("⚠️ User found, but they are already a super_admin.");
     } else {
-      await User.create({
-        fullName,
-        email,
-        phone,
-        password:
-          hashedPassword,
-        role: "super_admin",
-        isActive: true,
-        isVerified: true,
-      });
-
-      console.log(
-        "Super Admin created successfully."
-      );
+      console.log("❌ ERROR: User not found. Please register the account on your website first.");
     }
 
-    console.log(
-      `Super Admin email: ${email}`
-    );
-  } catch (error) {
-    console.error(
-      "Super Admin setup failed:",
-      error.message
-    );
-
-    process.exitCode = 1;
-  } finally {
+    // Disconnect and exit
     await mongoose.disconnect();
+    process.exit(0);
 
-    console.log(
-      "MongoDB connection closed."
-    );
+  } catch (error) {
+    console.error("FATAL ERROR:", error);
+    process.exit(1);
   }
 };
 
-createSuperAdmin();
+setupAdmin();
