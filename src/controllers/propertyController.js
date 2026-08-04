@@ -198,11 +198,22 @@ export const createProperty = async (
       checkOutTime,
     } = req.body;
 
+
+   const uploadedImages = (req.files || []).map((file, index) => ({
+  url: `/uploads/properties/${file.filename}`,
+  isCover: index === 0,
+}));
+
+let modifylocation = typeof location === "string"
+  ? JSON.parse(location)
+  : location;
+   console.log("+++++++++++++++Uploaded images:", uploadedImages);
+   console.log("++++++++++++++Form data:", req.body,modifylocation);
     if (
       !title ||
       !description ||
       !propertyType ||
-      !location?.address ||
+      !modifylocation?.address ||
       pricePerNight === undefined ||
       maxGuests === undefined ||
       bedrooms === undefined ||
@@ -276,7 +287,7 @@ export const createProperty = async (
         propertyType,
 
         location:
-          parseLocation(location),
+          parseLocation(modifylocation),
 
         pricePerNight:
           numericPrice,
@@ -309,7 +320,7 @@ export const createProperty = async (
           ),
 
         images:
-          sanitizeImages(images),
+          uploadedImages,
 
         rules:
           normalizeStringArray(rules),
@@ -2524,3 +2535,366 @@ export const updateFeaturedStatus =
         });
     }
   };
+
+
+//   export const getOwnerAllProperties = async (req, res) => {
+//   try {
+//     const ownerId = getUserId(req);
+
+//     const {
+//       search,
+//       propertyType,
+//       approvalStatus,
+//       sort = "newest",
+//     } = req.query;
+
+//     const filter = {
+//       owner: ownerId,
+//     };
+
+//     // Search
+//     if (search) {
+//       filter.$or = [
+//         {
+//           title: {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           description: {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           "location.city": {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           "location.address": {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//       ];
+//     }
+
+//     // Property Type
+//     if (propertyType && propertyType !== "All") {
+//       filter.propertyType = propertyType;
+//     }
+
+//     // Approval Status
+//     if (approvalStatus && approvalStatus !== "All") {
+//       filter.approvalStatus = approvalStatus;
+//     }
+
+//     let sortOption = {};
+
+//     switch (sort) {
+//       case "price-low":
+//         sortOption = {
+//           pricePerNight: 1,
+//         };
+//         break;
+
+//       case "price-high":
+//         sortOption = {
+//           pricePerNight: -1,
+//         };
+//         break;
+
+//       case "title":
+//         sortOption = {
+//           title: 1,
+//         };
+//         break;
+
+//       case "oldest":
+//         sortOption = {
+//           createdAt: 1,
+//         };
+//         break;
+
+//       default:
+//         sortOption = {
+//           createdAt: -1,
+//         };
+//     }
+
+//     const properties = await Property.find(filter)
+//       .populate(
+//         "owner",
+//         "fullName email phone"
+//       )
+//       .sort(sortOption);
+
+//     return res.status(200).json({
+//       success: true,
+//       total: properties.length,
+//       properties,
+//     });
+//   } catch (error) {
+//     console.error(error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Unable to fetch properties.",
+//     });
+//   }
+// };
+
+export const getOwnerAllProperties = async (req, res) => {
+  try {
+    const {
+      search,
+      propertyType,
+      approvalStatus,
+      sort = "newest",
+    } = req.query;
+
+    const filter = {};
+
+    // Search
+    if (search) {
+      filter.$or = [
+        {
+          title: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          description: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          "location.city": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          "location.address": {
+            $regex: search,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    // Property Type
+    if (propertyType && propertyType !== "All") {
+      filter.propertyType = propertyType;
+    }
+
+    // Approval Status
+    if (approvalStatus && approvalStatus !== "All") {
+      filter.approvalStatus = approvalStatus;
+    }
+
+    let sortOption = {};
+
+    switch (sort) {
+      case "price-low":
+        sortOption = { pricePerNight: 1 };
+        break;
+
+      case "price-high":
+        sortOption = { pricePerNight: -1 };
+        break;
+
+      case "rating":
+        sortOption = { rating: -1 };
+        break;
+
+      case "featured":
+        sortOption = {
+          isFeatured: -1,
+          createdAt: -1,
+        };
+        break;
+
+      case "oldest":
+        sortOption = { createdAt: 1 };
+        break;
+
+      default:
+        sortOption = { createdAt: -1 };
+    }
+
+    const properties = await Property.find(filter)
+      .populate("owner", "fullName email phone")
+      .sort(sortOption);
+
+    return res.status(200).json({
+      success: true,
+      total: properties.length,
+      properties,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to fetch properties.",
+    });
+  }
+};
+//   export const getAllProperties = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 12,
+//       search,
+//       propertyType,
+//       city,
+//       minPrice,
+//       maxPrice,
+//       bedrooms,
+//       guests,
+//       amenities,
+//       sort = "newest",
+//     } = req.query;
+
+//     const filter = {
+//       isActive: true,
+//       approvalStatus: "approved",
+//     };
+
+//     // Search
+//     if (search) {
+//       filter.$or = [
+//         {
+//           title: {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           description: {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           "location.address": {
+//             $regex: search,
+//             $options: "i",
+//           },
+//         },
+//       ];
+//     }
+
+//     if (propertyType) {
+//       filter.propertyType = propertyType;
+//     }
+
+//     if (city) {
+//       filter["location.city"] = city;
+//     }
+
+//     if (bedrooms) {
+//       filter.bedrooms = {
+//         $gte: Number(bedrooms),
+//       };
+//     }
+
+//     if (guests) {
+//       filter.maxGuests = {
+//         $gte: Number(guests),
+//       };
+//     }
+
+//     if (minPrice || maxPrice) {
+//       filter.pricePerNight = {};
+
+//       if (minPrice) {
+//         filter.pricePerNight.$gte =
+//           Number(minPrice);
+//       }
+
+//       if (maxPrice) {
+//         filter.pricePerNight.$lte =
+//           Number(maxPrice);
+//       }
+//     }
+
+//     if (amenities) {
+//       filter.amenities = {
+//         $in: amenities.split(","),
+//       };
+//     }
+
+//     let sortOption = {};
+
+//     switch (sort) {
+//       case "price-low":
+//         sortOption = {
+//           pricePerNight: 1,
+//         };
+//         break;
+
+//       case "price-high":
+//         sortOption = {
+//           pricePerNight: -1,
+//         };
+//         break;
+
+//       case "rating":
+//         sortOption = {
+//           rating: -1,
+//         };
+//         break;
+
+//       case "featured":
+//         sortOption = {
+//           isFeatured: -1,
+//           createdAt: -1,
+//         };
+//         break;
+
+//       default:
+//         sortOption = {
+//           createdAt: -1,
+//         };
+//     }
+
+//     const total = await Property.countDocuments(
+//       filter
+//     );
+
+//     const properties =
+//       await Property.find(filter)
+//         .populate(
+//           "owner",
+//           "fullName phone email"
+//         )
+//         .sort(sortOption)
+//         .skip((page - 1) * limit)
+//         .limit(Number(limit));
+
+//     return res.status(200).json({
+//       success: true,
+//       total,
+//       currentPage: Number(page),
+//       totalPages: Math.ceil(
+//         total / limit
+//       ),
+//       properties,
+//     });
+//   } catch (error) {
+//     console.error(error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message:
+//         "Unable to fetch properties.",
+//     });
+//   }
+// };

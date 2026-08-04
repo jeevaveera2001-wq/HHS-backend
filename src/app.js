@@ -39,6 +39,12 @@ import {
   paymentLimiter,
 } from "./middleware/rateLimitMiddleware.js";
 
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 
 /* =====================================
@@ -135,6 +141,11 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+app.use(
+    "/uploads",
+    express.static(path.join(__dirname, "uploads"))
+);
+
 /* =====================================
    Logging
 ===================================== */
@@ -208,6 +219,7 @@ app.get("/api/health", (req, res) => {
 ===================================== */
 
 app.use("/api", generalApiLimiter);
+
 
 app.post(
   "/api/auth/login",

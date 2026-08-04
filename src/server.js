@@ -99,10 +99,10 @@ const startServer = async () => {
     );
 
     server = app.listen(
-      PORT,
+      5000,
       () => {
         console.log(
-          `HHS Backend running on http://localhost:${PORT}`
+          `HHS Backend running on http://localhost:${5000}`
         );
 
         console.log(

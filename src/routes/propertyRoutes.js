@@ -15,12 +15,15 @@ import {
   togglePropertyActiveStatus,
   updateFeaturedStatus,
   updateProperty,
+  getOwnerAllProperties
 } from "../controllers/propertyController.js";
 
 import {
   protect,
   authorizeRoles,
 } from "../middleware/authMiddleware.js";
+
+import upload from "../middleware/uploadPropertyImage.js";
 
 const router = express.Router();
 
@@ -33,6 +36,9 @@ router.get(
   "/",
   getPublicProperties
 );
+
+
+router.get("/owner", getOwnerAllProperties);
 
 // GET /api/properties/featured
 router.get(
@@ -49,6 +55,7 @@ router.get(
 router.post(
   "/",
   protect,
+  upload.array("images", 10), // Allow up to 10 images
   createProperty
 );
 
