@@ -199,10 +199,18 @@ export const createProperty = async (
     } = req.body;
 
 
-   const uploadedImages = (req.files || []).map((file, index) => ({
-  url: `/uploads/properties/${file.filename}`,
-  isCover: index === 0,
-}));
+//    const uploadedImages = (req.files || []).map((file, index) => ({
+//   url: `/uploads/properties/${file.filename}`,
+//   isCover: index === 0,
+// }));
+
+const uploadedImages = (req.files || []).map((file, index) => ({
+     // Cloudinary provides the full secure URL in the file.path property
+     url: file.path, 
+     isCover: index === 0,
+   }));
+
+   console.log("Uploaded images:", uploadedImages);
 
 let modifylocation = typeof location === "string"
   ? JSON.parse(location)
