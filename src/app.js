@@ -323,7 +323,7 @@ app.use(
 ===================================== */
 
 app.use(
-  "/api/support",
+  "/api/support-tickets",
   supportTicketRoutes
 );
 
