@@ -5,6 +5,10 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import mongoose from "mongoose";
 
+import path from "node:path";
+import {
+  fileURLToPath,
+} from "node:url";
 
 /* =====================================
    Application routes
@@ -22,14 +26,18 @@ import reviewRoutes from "./routes/reviewRoutes.js";
 import savedPropertyRoutes from "./routes/savedPropertyRoutes.js";
 import supportTicketRoutes from "./routes/supportTicketRoutes.js";
 import contactEnquiryRoutes from "./routes/contactEnquiryRoutes.js";
+import ownerRequestRoutes from "./routes/ownerRequestRoutes.js";
+
 /* =====================================
    Payment webhook
 ===================================== */
 
-import { handleRazorpayWebhook } from "./controllers/paymentController.js";
+import {
+  handleRazorpayWebhook,
+} from "./controllers/paymentController.js";
 
 /* =====================================
-   Rate limit middleware
+   Rate-limit middleware
 ===================================== */
 
 import {
@@ -39,11 +47,15 @@ import {
   paymentLimiter,
 } from "./middleware/rateLimitMiddleware.js";
 
-import path from "path";
-import { fileURLToPath } from "url";
+/* =====================================
+   Directory configuration
+===================================== */
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename =
+  fileURLToPath(import.meta.url);
+
+const __dirname =
+  path.dirname(__filename);
 
 const app = express();
 
@@ -51,15 +63,27 @@ const app = express();
    Proxy configuration
 ===================================== */
 
-if (process.env.NODE_ENV === "production") {
+if (
+  process.env.NODE_ENV ===
+  "production"
+) {
   app.set("trust proxy", 1);
 }
 
 /* =====================================
-   Security
+   Security and logging
 ===================================== */
-app.use(morgan('combined')); // Now it catches everything!
+
 app.disable("x-powered-by");
+
+app.use(
+  morgan(
+    process.env.NODE_ENV ===
+      "production"
+      ? "combined"
+      : "dev"
+  )
+);
 
 app.use(
   helmet({
@@ -70,23 +94,36 @@ app.use(
 );
 
 /* =====================================
-   CORS Configuration
+   CORS configuration
 ===================================== */
 
-const normalizeOrigin = (origin) =>
-  origin.trim().replace(/\/+$/, "");
+const normalizeOrigin = (
+  origin = ""
+) => {
+  return origin
+    .trim()
+    .replace(/\/+$/, "");
+};
 
 const allowedOrigins = [
   "https://hogenakkalhomestays.com",
   "https://www.hogenakkalhomestays.com",
   "http://localhost:5173",
-];
+].map(normalizeOrigin);
 
-if (process.env.FRONTEND_URL) {
-  process.env.FRONTEND_URL.split(",")
-    .map((origin) => normalizeOrigin(origin))
+if (
+  process.env.FRONTEND_URL?.trim()
+) {
+  process.env.FRONTEND_URL
+    .split(",")
+    .map(normalizeOrigin)
+    .filter(Boolean)
     .forEach((origin) => {
-      if (!allowedOrigins.includes(origin)) {
+      if (
+        !allowedOrigins.includes(
+          origin
+        )
+      ) {
         allowedOrigins.push(origin);
       }
     });
@@ -94,22 +131,39 @@ if (process.env.FRONTEND_URL) {
 
 const corsOptions = {
   origin(origin, callback) {
-    // Allow Postman, mobile apps and server-to-server requests
+    /*
+     * Requests from Postman,
+     * mobile applications and
+     * server-to-server clients may
+     * not contain an Origin header.
+     */
     if (!origin) {
       return callback(null, true);
     }
 
-    const requestOrigin = normalizeOrigin(origin);
+    const requestOrigin =
+      normalizeOrigin(origin);
 
-    if (allowedOrigins.includes(requestOrigin)) {
+    if (
+      allowedOrigins.includes(
+        requestOrigin
+      )
+    ) {
       return callback(null, true);
     }
 
-    console.error("Blocked by CORS:", requestOrigin);
-
-    return callback(
-      new Error("Origin not allowed by CORS")
+    console.error(
+      "Blocked by CORS:",
+      requestOrigin
     );
+
+    const corsError = new Error(
+      "Origin not allowed by CORS"
+    );
+
+    corsError.status = 403;
+
+    return callback(corsError);
   },
 
   credentials: true,
@@ -141,20 +195,30 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+/* =====================================
+   Static uploads
+===================================== */
+
 app.use(
-    "/uploads",
-    express.static(path.join(__dirname, "uploads"))
+  "/uploads",
+  express.static(
+    path.join(
+      __dirname,
+      "uploads"
+    )
+  )
 );
 
 /* =====================================
-   Logging
+   Razorpay webhook
 ===================================== */
 
-
-/* =====================================
-   Razorpay Webhook
-===================================== */
-
+/*
+ * This webhook must be registered
+ * before express.json() because
+ * Razorpay signature verification
+ * requires the raw request body.
+ */
 app.post(
   "/api/payments/webhook",
   express.raw({
@@ -165,7 +229,7 @@ app.post(
 );
 
 /* =====================================
-   Body Parser
+   Body parsers
 ===================================== */
 
 app.use(
@@ -184,42 +248,64 @@ app.use(
 app.use(cookieParser());
 
 /* =====================================
-   Status Routes
+   Status routes
 ===================================== */
 
 app.get("/", (req, res) => {
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
-    message: "HHS Backend API is running",
+    message:
+      "HHS Backend API is running",
     company: "VeeraWebTech",
     environment:
-      process.env.NODE_ENV || "development",
-    timestamp: new Date().toISOString(),
+      process.env.NODE_ENV ||
+      "development",
+    timestamp:
+      new Date().toISOString(),
   });
 });
 
-app.get("/api/health", (req, res) => {
-  const databaseConnected =
-    mongoose.connection.readyState === 1;
+app.get(
+  "/api/health",
+  (req, res) => {
+    const databaseConnected =
+      mongoose.connection
+        .readyState === 1;
 
-  res.status(databaseConnected ? 200 : 503).json({
-    success: databaseConnected,
-    status: databaseConnected
-      ? "healthy"
-      : "unhealthy",
-    database: databaseConnected
-      ? "connected"
-      : "disconnected",
-    timestamp: new Date().toISOString(),
-  });
-});
+    return res
+      .status(
+        databaseConnected
+          ? 200
+          : 503
+      )
+      .json({
+        success:
+          databaseConnected,
+
+        status:
+          databaseConnected
+            ? "healthy"
+            : "unhealthy",
+
+        database:
+          databaseConnected
+            ? "connected"
+            : "disconnected",
+
+        timestamp:
+          new Date().toISOString(),
+      });
+  }
+);
 
 /* =====================================
-   API Rate Limiting
+   API rate limiting
 ===================================== */
 
-app.use("/api", generalApiLimiter);
-
+app.use(
+  "/api",
+  generalApiLimiter
+);
 
 app.post(
   "/api/auth/login",
@@ -227,7 +313,7 @@ app.post(
 );
 
 /* =====================================
-   Authentication Routes
+   Authentication routes
 ===================================== */
 
 app.use(
@@ -237,7 +323,7 @@ app.use(
 );
 
 /* =====================================
-   Property Routes
+   Property routes
 ===================================== */
 
 app.use(
@@ -246,7 +332,7 @@ app.use(
 );
 
 /* =====================================
-   Booking Routes
+   Booking routes
 ===================================== */
 
 app.use(
@@ -255,7 +341,7 @@ app.use(
 );
 
 /* =====================================
-   Payment Routes
+   Payment routes
 ===================================== */
 
 app.use(
@@ -265,7 +351,7 @@ app.use(
 );
 
 /* =====================================
-   Staff Routes
+   Staff routes
 ===================================== */
 
 app.use(
@@ -274,7 +360,7 @@ app.use(
 );
 
 /* =====================================
-   Admin Routes
+   Admin routes
 ===================================== */
 
 app.use(
@@ -283,7 +369,7 @@ app.use(
 );
 
 /* =====================================
-   User Management Routes
+   User-management routes
 ===================================== */
 
 app.use(
@@ -292,7 +378,7 @@ app.use(
 );
 
 /* =====================================
-   Saved Property Routes
+   Saved-property routes
 ===================================== */
 
 app.use(
@@ -301,7 +387,7 @@ app.use(
 );
 
 /* =====================================
-   Review Routes
+   Review routes
 ===================================== */
 
 app.use(
@@ -310,7 +396,7 @@ app.use(
 );
 
 /* =====================================
-   Payout Account Routes
+   Payout-account routes
 ===================================== */
 
 app.use(
@@ -319,7 +405,7 @@ app.use(
 );
 
 /* =====================================
-   Support Ticket Routes
+   Support-ticket routes
 ===================================== */
 
 app.use(
@@ -328,7 +414,7 @@ app.use(
 );
 
 /* =====================================
-   Contact Enquiry Routes
+   Contact-enquiry routes
 ===================================== */
 
 app.use(
@@ -337,79 +423,140 @@ app.use(
 );
 
 /* =====================================
-   404 Route Handler
+   Owner-request routes
 ===================================== */
 
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.originalUrl}`,
-  });
-});
+/*
+ * Customer:
+ * POST /api/owner-requests
+ * GET  /api/owner-requests/my-requests
+ *
+ * Administrator:
+ * GET   /api/owner-requests
+ * GET   /api/owner-requests/:id
+ * PATCH /api/owner-requests/:id/review
+ */
+app.use(
+  "/api/owner-requests",
+  ownerRequestRoutes
+);
 
 /* =====================================
-   Global Error Handler
+   404 route handler
 ===================================== */
 
-app.use((err, req, res, next) => {
-  console.error("Global Error:", err);
-
-  if (err.message === "Origin not allowed by CORS") {
-    return res.status(403).json({
-      success: false,
-      message: err.message,
-    });
-  }
-
-  if (err.name === "ValidationError") {
-    return res.status(400).json({
-      success: false,
-      message: err.message,
-    });
-  }
-
-  if (err.name === "CastError") {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid resource ID.",
-    });
-  }
-
-  if (err.name === "JsonWebTokenError") {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid authentication token.",
-    });
-  }
-
-  if (err.name === "TokenExpiredError") {
-    return res.status(401).json({
-      success: false,
-      message: "Authentication token has expired.",
-    });
-  }
-
-  if (err.code === 11000) {
-    return res.status(409).json({
-      success: false,
-      message: "Duplicate record found.",
-    });
-  }
-
-  return res.status(err.status || 500).json({
+/*
+ * This handler must remain after all
+ * application routes.
+ */
+app.use((req, res) => {
+  return res.status(404).json({
     success: false,
     message:
-      process.env.NODE_ENV === "production"
-        ? "Internal Server Error"
-        : err.message,
-    ...(process.env.NODE_ENV !== "production" && {
-      stack: err.stack,
-    }),
+      `Route not found: ${req.originalUrl}`,
   });
 });
 
 /* =====================================
-   Export Express App
+   Global error handler
+===================================== */
+
+/*
+ * Express recognizes this as an error
+ * handler because all four arguments
+ * are present.
+ */
+app.use(
+  (
+    err,
+    req,
+    res,
+    next
+  ) => {
+    console.error(
+      "Global Error:",
+      err
+    );
+
+    if (
+      err.message ===
+      "Origin not allowed by CORS"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: err.message,
+      });
+    }
+
+    if (
+      err.name ===
+      "ValidationError"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+      });
+    }
+
+    if (err.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid resource ID.",
+      });
+    }
+
+    if (
+      err.name ===
+      "JsonWebTokenError"
+    ) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Invalid authentication token.",
+      });
+    }
+
+    if (
+      err.name ===
+      "TokenExpiredError"
+    ) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "Authentication token has expired.",
+      });
+    }
+
+    if (err.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Duplicate record found.",
+      });
+    }
+
+    return res
+      .status(err.status || 500)
+      .json({
+        success: false,
+
+        message:
+          process.env.NODE_ENV ===
+          "production"
+            ? "Internal Server Error"
+            : err.message,
+
+        ...(process.env.NODE_ENV !==
+          "production" && {
+          stack: err.stack,
+        }),
+      });
+  }
+);
+
+/* =====================================
+   Export Express application
 ===================================== */
 
 export default app;

@@ -1,12 +1,12 @@
 import "dotenv/config";
 
-import { createServer } from "node:http";
+import {
+  createServer,
+} from "node:http";
 
 import mongoose from "mongoose";
 
 import app from "./app.js";
-
-import ownerRequestRoutes from "./routes/ownerRequestRoutes.js";
 
 import {
   closeSocketServices,
@@ -18,10 +18,11 @@ import {
    Server configuration
 ===================================== */
 
-const parsedPort = Number.parseInt(
-  process.env.PORT || "5000",
-  10
-);
+const parsedPort =
+  Number.parseInt(
+    process.env.PORT || "5000",
+    10
+  );
 
 const PORT =
   Number.isInteger(parsedPort) &&
@@ -32,23 +33,6 @@ const PORT =
 
 let server = null;
 let shuttingDown = false;
-
-/* =====================================
-   Owner request API routes
-===================================== */
-
-/*
- * The owner-request form sends requests to:
- *
- * POST /api/owner-requests
- *
- * Mount the route before creating and
- * starting the HTTP server.
- */
-app.use(
-  "/api/owner-requests",
-  ownerRequestRoutes
-);
 
 /* =====================================
    Environment validation
@@ -69,7 +53,9 @@ const validateEnvironment = () => {
       }
     );
 
-  if (missingVariables.length > 0) {
+  if (
+    missingVariables.length > 0
+  ) {
     throw new Error(
       `Missing required environment variable(s): ${missingVariables.join(
         ", "
@@ -78,7 +64,8 @@ const validateEnvironment = () => {
   }
 
   if (
-    process.env.NODE_ENV === "production" &&
+    process.env.NODE_ENV ===
+      "production" &&
     !process.env.FRONTEND_URL?.trim()
   ) {
     console.warn(
@@ -98,10 +85,17 @@ const startServer = async () => {
     await mongoose.connect(
       process.env.MONGO_URI,
       {
-        serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 15000,
-        socketTimeoutMS: 45000,
+        serverSelectionTimeoutMS:
+          15000,
+
+        connectTimeoutMS:
+          15000,
+
+        socketTimeoutMS:
+          45000,
+
         maxPoolSize: 20,
+
         minPoolSize: 1,
       }
     );
@@ -111,8 +105,8 @@ const startServer = async () => {
     );
 
     /*
-     * Socket.IO must use the same HTTP
-     * server as Express.
+     * Socket.IO must use the same
+     * HTTP server as Express.
      */
     server = createServer(app);
 
@@ -120,8 +114,8 @@ const startServer = async () => {
 
     /*
      * MongoDB Atlas supports change
-     * streams because it uses a replica
-     * set.
+     * streams because it uses a
+     * replica set.
      */
     startPropertyChangeStream();
 
@@ -142,13 +136,18 @@ const startServer = async () => {
       );
 
       console.log(
-        `Owner request API enabled at /api/owner-requests`
+        "Owner request API enabled at /api/owner-requests"
       );
     });
 
-    server.keepAliveTimeout = 65000;
-    server.headersTimeout = 66000;
-    server.requestTimeout = 120000;
+    server.keepAliveTimeout =
+      65000;
+
+    server.headersTimeout =
+      66000;
+
+    server.requestTimeout =
+      120000;
   } catch (error) {
     console.error(
       "Backend startup failed:",
@@ -156,7 +155,8 @@ const startServer = async () => {
     );
 
     if (
-      mongoose.connection.readyState !== 0
+      mongoose.connection
+        .readyState !== 0
     ) {
       await mongoose
         .disconnect()
@@ -185,16 +185,14 @@ const shutdownServer = async (
     `${signal} received. Shutting down HHS Backend...`
   );
 
-  const forceShutdownTimer = setTimeout(
-    () => {
+  const forceShutdownTimer =
+    setTimeout(() => {
       console.error(
         "Forced shutdown after timeout."
       );
 
       process.exit(1);
-    },
-    10000
-  );
+    }, 10000);
 
   forceShutdownTimer.unref();
 
@@ -203,15 +201,20 @@ const shutdownServer = async (
 
     if (server) {
       await new Promise(
-        (resolve, reject) => {
-          server.close((error) => {
-            if (error) {
-              reject(error);
-              return;
-            }
+        (
+          resolve,
+          reject
+        ) => {
+          server.close(
+            (error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
 
-            resolve();
-          });
+              resolve();
+            }
+          );
         }
       );
 
@@ -221,7 +224,8 @@ const shutdownServer = async (
     }
 
     if (
-      mongoose.connection.readyState !== 0
+      mongoose.connection
+        .readyState !== 0
     ) {
       await mongoose.disconnect();
 
@@ -230,7 +234,9 @@ const shutdownServer = async (
       );
     }
 
-    clearTimeout(forceShutdownTimer);
+    clearTimeout(
+      forceShutdownTimer
+    );
 
     console.log(
       "HHS Backend shutdown completed."
@@ -238,7 +244,9 @@ const shutdownServer = async (
 
     process.exit(exitCode);
   } catch (error) {
-    clearTimeout(forceShutdownTimer);
+    clearTimeout(
+      forceShutdownTimer
+    );
 
     console.error(
       "Backend shutdown failed:",
