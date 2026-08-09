@@ -1,8 +1,18 @@
 import "dotenv/config";
 
+import {
+  createServer,
+} from "node:http";
+
 import mongoose from "mongoose";
 
 import app from "./app.js";
+
+import {
+  closeSocketServices,
+  initializeSocket,
+  startPropertyChangeStream,
+} from "./config/socket.js";
 
 /* =====================================
    Server configuration
@@ -22,7 +32,6 @@ const PORT =
     : 5000;
 
 let server = null;
-
 let shuttingDown = false;
 
 /* =====================================
@@ -44,9 +53,7 @@ const validateEnvironment = () => {
       }
     );
 
-  if (
-    missingVariables.length > 0
-  ) {
+  if (missingVariables.length > 0) {
     throw new Error(
       `Missing required environment variable(s): ${missingVariables.join(
         ", "
@@ -72,10 +79,7 @@ const validateEnvironment = () => {
 const startServer = async () => {
   try {
     validateEnvironment();
-    console.log(
-      "+++++++++Environment variables validated successfully.+++++",
-       process.env.MONGO_URI,
-    );
+
     await mongoose.connect(
       process.env.MONGO_URI,
       {
@@ -89,7 +93,6 @@ const startServer = async () => {
           45000,
 
         maxPoolSize: 20,
-
         minPoolSize: 1,
       }
     );
@@ -98,11 +101,27 @@ const startServer = async () => {
       `MongoDB connected successfully: ${mongoose.connection.host}`
     );
 
-    server = app.listen(
-      5000,
+    /*
+     * Socket.IO must use the same HTTP
+     * server as Express.
+     */
+    server =
+      createServer(app);
+
+    initializeSocket(server);
+
+    /*
+     * MongoDB Atlas supports change
+     * streams because it uses a replica
+     * set.
+     */
+    startPropertyChangeStream();
+
+    server.listen(
+      PORT,
       () => {
         console.log(
-          `HHS Backend running on http://localhost:${5000}`
+          `HHS Backend running on port ${PORT}`
         );
 
         console.log(
@@ -110,6 +129,10 @@ const startServer = async () => {
             process.env.NODE_ENV ||
             "development"
           }`
+        );
+
+        console.log(
+          "HHS realtime property updates enabled."
         );
       }
     );
@@ -125,7 +148,7 @@ const startServer = async () => {
   } catch (error) {
     console.error(
       "Backend startup failed:",
-      error.message
+      error
     );
 
     if (
@@ -171,6 +194,8 @@ const shutdownServer = async (
   forceShutdownTimer.unref();
 
   try {
+    await closeSocketServices();
+
     if (server) {
       await new Promise(
         (
@@ -222,7 +247,7 @@ const shutdownServer = async (
 
     console.error(
       "Backend shutdown failed:",
-      error.message
+      error
     );
 
     process.exit(1);
@@ -230,7 +255,7 @@ const shutdownServer = async (
 };
 
 /* =====================================
-   MongoDB connection events
+   MongoDB events
 ===================================== */
 
 mongoose.connection.on(
@@ -267,7 +292,7 @@ mongoose.connection.on(
   (error) => {
     console.error(
       "MongoDB connection error:",
-      error.message
+      error
     );
   }
 );
