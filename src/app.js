@@ -21,7 +21,7 @@ import payoutAccountRoutes from "./routes/payoutAccountRoutes.js";
 import reviewRoutes from "./routes/reviewRoutes.js";
 import savedPropertyRoutes from "./routes/savedPropertyRoutes.js";
 import supportTicketRoutes from "./routes/supportTicketRoutes.js";
-
+import contactEnquiryRoutes from "./routes/contactEnquiryRoutes.js";
 /* =====================================
    Payment webhook
 ===================================== */
@@ -325,6 +325,15 @@ app.use(
 app.use(
   "/api/support-tickets",
   supportTicketRoutes
+);
+
+/* =====================================
+   Contact Enquiry Routes
+===================================== */
+
+app.use(
+  "/api/contact-enquiries",
+  contactEnquiryRoutes
 );
 
 /* =====================================
