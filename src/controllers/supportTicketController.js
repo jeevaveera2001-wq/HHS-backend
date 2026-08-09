@@ -4,7 +4,7 @@ import SupportTicket from "../models/SupportTicket.js";
 import User from "../models/User.js";
 
 /* =====================================
-   Support staff roles
+   Support-ticket constants
 ===================================== */
 
 const SUPPORT_STAFF_ROLES = [
@@ -18,8 +18,10 @@ const SUPPORT_STAFF_ROLES = [
 
 const TICKET_STATUSES = [
   "open",
-  "in_progress",
+  "assigned",
   "waiting_for_customer",
+  "waiting_for_owner",
+  "escalated",
   "resolved",
   "closed",
 ];
@@ -32,16 +34,15 @@ const TICKET_PRIORITIES = [
 ];
 
 const TICKET_CATEGORIES = [
-  "general",
-  "account",
   "booking",
   "payment",
   "refund",
   "property",
   "owner_verification",
+  "account",
   "technical",
   "complaint",
-  "other",
+  "general",
 ];
 
 /* =====================================
@@ -49,9 +50,7 @@ const TICKET_CATEGORIES = [
 ===================================== */
 
 const isValidObjectId = (id) => {
-  return mongoose.Types.ObjectId.isValid(
-    id
-  );
+  return mongoose.Types.ObjectId.isValid(id);
 };
 
 const isSupportStaff = (user) => {
@@ -72,22 +71,14 @@ const getDocumentId = (value) => {
   return value;
 };
 
-const isTicketOwner = (
-  ticket,
-  user
-) => {
+const isTicketOwner = (ticket, user) => {
   const ticketUserId = getDocumentId(
     ticket.createdBy
   );
 
-  const currentUserId = getDocumentId(
-    user
-  );
+  const currentUserId = getDocumentId(user);
 
-  if (
-    !ticketUserId ||
-    !currentUserId
-  ) {
+  if (!ticketUserId || !currentUserId) {
     return false;
   }
 
@@ -97,23 +88,41 @@ const isTicketOwner = (
   );
 };
 
-const canAccessTicket = (
-  ticket,
-  user
-) => {
+const canAccessTicket = (ticket, user) => {
   return (
     isSupportStaff(user) ||
     isTicketOwner(ticket, user)
   );
 };
 
-const escapeRegularExpression = (
-  value
-) => {
+const escapeRegularExpression = (value) => {
   return value.replace(
     /[.*+?^${}()|[\]\\]/g,
     "\\$&"
   );
+};
+
+const getPaginationValues = (query) => {
+  const page = Math.max(
+    Number.parseInt(query.page, 10) || 1,
+    1
+  );
+
+  const limit = Math.min(
+    Math.max(
+      Number.parseInt(query.limit, 10) || 10,
+      1
+    ),
+    100
+  );
+
+  const skip = (page - 1) * limit;
+
+  return {
+    page,
+    limit,
+    skip,
+  };
 };
 
 /* =====================================
@@ -143,6 +152,11 @@ const populateTicketQuery = (query) => {
         "title slug location images status",
     },
     {
+      path: "relatedOwner",
+      select:
+        "fullName email phone role profileImage",
+    },
+    {
       path: "messages.sender",
       select:
         "fullName email role profileImage",
@@ -153,12 +167,12 @@ const populateTicketQuery = (query) => {
         "fullName email role profileImage",
     },
     {
-      path: "resolvedBy",
+      path: "escalatedTo",
       select:
-        "fullName email role profileImage",
+        "fullName email phone role profileImage",
     },
     {
-      path: "closedBy",
+      path: "resolvedBy",
       select:
         "fullName email role profileImage",
     },
@@ -177,443 +191,368 @@ const findPopulatedTicket = async (
    Create support ticket
 ===================================== */
 
-export const createSupportTicket =
-  async (req, res) => {
-    try {
-      const subject =
-        req.body.subject?.trim();
-
-      const description =
-        req.body.description?.trim();
-
-      const category =
-        req.body.category || "general";
-
-      const priority =
-        req.body.priority || "medium";
-
-      const relatedBooking =
-        req.body.relatedBooking || null;
-
-      const relatedProperty =
-        req.body.relatedProperty || null;
-
-      const attachments =
-        Array.isArray(
-          req.body.attachments
-        )
-          ? req.body.attachments
-          : [];
-
-      if (!subject || !description) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Subject and description are required.",
-        });
-      }
-
-      if (subject.length < 5) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Subject must contain at least 5 characters.",
-        });
-      }
-
-      if (description.length < 10) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Description must contain at least 10 characters.",
-        });
-      }
-
-      if (
-        !TICKET_CATEGORIES.includes(
-          category
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid support-ticket category.",
-        });
-      }
-
-      if (
-        !TICKET_PRIORITIES.includes(
-          priority
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid support-ticket priority.",
-        });
-      }
-
-      if (
-        relatedBooking &&
-        !isValidObjectId(
-          relatedBooking
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid related booking ID.",
-        });
-      }
-
-      if (
-        relatedProperty &&
-        !isValidObjectId(
-          relatedProperty
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid related property ID.",
-        });
-      }
-
-      const ticket =
-        await SupportTicket.create({
-          createdBy: req.user._id,
-          subject,
-          description,
-          category,
-          priority,
-          relatedBooking,
-          relatedProperty,
-          attachments,
-          status: "open",
-          lastReplyAt: new Date(),
-        });
-
-      const populatedTicket =
-        await findPopulatedTicket(
-          ticket._id
-        );
-
-      return res.status(201).json({
-        success: true,
-        message:
-          "Support ticket created successfully.",
-        ticket: populatedTicket,
-      });
-    } catch (error) {
-      console.error(
-        "Create support ticket error:",
-        error
-      );
-
-      return res.status(500).json({
+export const createSupportTicket = async (
+  req,
+  res
+) => {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({
         success: false,
         message:
-          "Unable to create support ticket.",
+          "Authentication required. Please login again.",
       });
     }
-  };
+
+    if (
+      !["customer", "owner"].includes(
+        req.user.role
+      )
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only customers and property owners can create support tickets.",
+      });
+    }
+
+    const subject =
+      req.body.subject?.trim();
+
+    const description =
+      req.body.description?.trim();
+
+    const category =
+      req.body.category || "general";
+
+    const priority =
+      req.body.priority || "medium";
+
+    const relatedBooking =
+      req.body.relatedBooking || null;
+
+    const relatedProperty =
+      req.body.relatedProperty || null;
+
+    const relatedOwner =
+      req.body.relatedOwner || null;
+
+    const attachments = Array.isArray(
+      req.body.attachments
+    )
+      ? req.body.attachments
+      : [];
+
+    if (!subject || !description) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Subject and description are required.",
+      });
+    }
+
+    if (subject.length < 5) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Subject must contain at least 5 characters.",
+      });
+    }
+
+    if (subject.length > 200) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Subject cannot exceed 200 characters.",
+      });
+    }
+
+    if (description.length < 10) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Description must contain at least 10 characters.",
+      });
+    }
+
+    if (description.length > 5000) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Description cannot exceed 5000 characters.",
+      });
+    }
+
+    if (
+      !TICKET_CATEGORIES.includes(category)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid support-ticket category.",
+      });
+    }
+
+    if (
+      !TICKET_PRIORITIES.includes(priority)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid support-ticket priority.",
+      });
+    }
+
+    if (
+      relatedBooking &&
+      !isValidObjectId(relatedBooking)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid related booking ID.",
+      });
+    }
+
+    if (
+      relatedProperty &&
+      !isValidObjectId(relatedProperty)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid related property ID.",
+      });
+    }
+
+    if (
+      relatedOwner &&
+      !isValidObjectId(relatedOwner)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid related owner ID.",
+      });
+    }
+
+    const initialMessages = [];
+
+    if (attachments.length > 0) {
+      initialMessages.push({
+        sender: req.user._id,
+        message: description,
+        attachments,
+        isStaffReply: false,
+      });
+    }
+
+    const ticket =
+      await SupportTicket.create({
+        createdBy: req.user._id,
+
+        // Required by SupportTicket model
+        userType: req.user.role,
+
+        subject,
+        description,
+        category,
+        priority,
+        status: "open",
+
+        relatedBooking,
+        relatedProperty,
+        relatedOwner,
+
+        messages: initialMessages,
+        lastActivityAt: new Date(),
+      });
+
+    const populatedTicket =
+      await findPopulatedTicket(ticket._id);
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Support ticket created successfully.",
+      ticket: populatedTicket,
+    });
+  } catch (error) {
+    console.error(
+      "Create support ticket error:",
+      error
+    );
+
+    if (error.name === "ValidationError") {
+      const validationMessage =
+        Object.values(error.errors)
+          .map((item) => item.message)
+          .join(" ");
+
+      return res.status(400).json({
+        success: false,
+        message:
+          validationMessage ||
+          "Support-ticket validation failed.",
+      });
+    }
+
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid support-ticket information.",
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Ticket reference already exists. Please submit again.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to create support ticket.",
+    });
+  }
+};
 
 /* =====================================
    Get logged-in user's tickets
 ===================================== */
 
-export const getMySupportTickets =
-  async (req, res) => {
-    try {
-      const {
-        status,
-        priority,
-        category,
-        search,
-      } = req.query;
+export const getMySupportTickets = async (
+  req,
+  res
+) => {
+  try {
+    const {
+      status,
+      priority,
+      category,
+      search,
+    } = req.query;
 
-      const page = Math.max(
-        Number.parseInt(
-          req.query.page,
-          10
-        ) || 1,
-        1
-      );
+    const { page, limit, skip } =
+      getPaginationValues(req.query);
 
-      const limit = Math.min(
-        Math.max(
-          Number.parseInt(
-            req.query.limit,
-            10
-          ) || 20,
-          1
-        ),
-        100
-      );
+    const filter = {
+      createdBy: req.user._id,
+    };
 
-      const filter = {
-        createdBy: req.user._id,
-      };
+    if (status) {
+      if (!TICKET_STATUSES.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid ticket status.",
+        });
+      }
 
+      filter.status = status;
+    }
+
+    if (priority) {
       if (
-        status &&
-        status !== "all"
+        !TICKET_PRIORITIES.includes(priority)
       ) {
-        filter.status = status;
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid ticket priority.",
+        });
       }
 
+      filter.priority = priority;
+    }
+
+    if (category) {
       if (
-        priority &&
-        priority !== "all"
+        !TICKET_CATEGORIES.includes(category)
       ) {
-        filter.priority = priority;
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid ticket category.",
+        });
       }
 
-      if (
-        category &&
-        category !== "all"
-      ) {
-        filter.category = category;
-      }
+      filter.category = category;
+    }
 
-      if (search?.trim()) {
-        const safeSearch =
-          escapeRegularExpression(
-            search.trim()
-          );
+    if (search?.trim()) {
+      const safeSearch =
+        escapeRegularExpression(
+          search.trim()
+        );
 
-        filter.$or = [
-          {
-            ticketNumber: {
-              $regex: safeSearch,
-              $options: "i",
-            },
+      filter.$or = [
+        {
+          ticketReference: {
+            $regex: safeSearch,
+            $options: "i",
           },
-          {
-            subject: {
-              $regex: safeSearch,
-              $options: "i",
-            },
+        },
+        {
+          subject: {
+            $regex: safeSearch,
+            $options: "i",
           },
-          {
-            description: {
-              $regex: safeSearch,
-              $options: "i",
-            },
+        },
+        {
+          description: {
+            $regex: safeSearch,
+            $options: "i",
           },
-        ];
-      }
+        },
+      ];
+    }
 
-      const skip =
-        (page - 1) * limit;
-
-      const [
-        tickets,
-        total,
-      ] = await Promise.all([
+    const [tickets, totalTickets] =
+      await Promise.all([
         populateTicketQuery(
           SupportTicket.find(filter)
         )
           .sort({
-            updatedAt: -1,
+            lastActivityAt: -1,
+            createdAt: -1,
           })
           .skip(skip)
           .limit(limit),
 
-        SupportTicket.countDocuments(
-          filter
-        ),
+        SupportTicket.countDocuments(filter),
       ]);
 
-      return res.status(200).json({
-        success: true,
-        tickets,
+    return res.status(200).json({
+      success: true,
+      count: tickets.length,
+      totalTickets,
+      currentPage: page,
+      totalPages: Math.ceil(
+        totalTickets / limit
+      ),
+      tickets,
+    });
+  } catch (error) {
+    console.error(
+      "Get my support tickets error:",
+      error
+    );
 
-        pagination: {
-          page,
-          limit,
-          total,
-
-          pages: Math.ceil(
-            total / limit
-          ),
-        },
-      });
-    } catch (error) {
-      console.error(
-        "Get my support tickets error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load your support tickets.",
-      });
-    }
-  };
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to load your support tickets.",
+    });
+  }
+};
 
 /* =====================================
-   Get managed support tickets
-===================================== */
-
-export const getManagedSupportTickets =
-  async (req, res) => {
-    try {
-      const {
-        status,
-        priority,
-        category,
-        assignedTo,
-        search,
-      } = req.query;
-
-      const page = Math.max(
-        Number.parseInt(
-          req.query.page,
-          10
-        ) || 1,
-        1
-      );
-
-      const limit = Math.min(
-        Math.max(
-          Number.parseInt(
-            req.query.limit,
-            10
-          ) || 30,
-          1
-        ),
-        100
-      );
-
-      const filter = {};
-
-      if (
-        status &&
-        status !== "all"
-      ) {
-        filter.status = status;
-      }
-
-      if (
-        priority &&
-        priority !== "all"
-      ) {
-        filter.priority = priority;
-      }
-
-      if (
-        category &&
-        category !== "all"
-      ) {
-        filter.category = category;
-      }
-
-      if (
-        assignedTo === "unassigned"
-      ) {
-        filter.assignedTo = null;
-      } else if (
-        assignedTo &&
-        assignedTo !== "all"
-      ) {
-        if (
-          !isValidObjectId(
-            assignedTo
-          )
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid assigned staff ID.",
-          });
-        }
-
-        filter.assignedTo =
-          assignedTo;
-      }
-
-      if (search?.trim()) {
-        const safeSearch =
-          escapeRegularExpression(
-            search.trim()
-          );
-
-        filter.$or = [
-          {
-            ticketNumber: {
-              $regex: safeSearch,
-              $options: "i",
-            },
-          },
-          {
-            subject: {
-              $regex: safeSearch,
-              $options: "i",
-            },
-          },
-          {
-            description: {
-              $regex: safeSearch,
-              $options: "i",
-            },
-          },
-        ];
-      }
-
-      const skip =
-        (page - 1) * limit;
-
-      const [
-        tickets,
-        total,
-      ] = await Promise.all([
-        populateTicketQuery(
-          SupportTicket.find(filter)
-        )
-          .sort({
-            priority: -1,
-            updatedAt: -1,
-          })
-          .skip(skip)
-          .limit(limit),
-
-        SupportTicket.countDocuments(
-          filter
-        ),
-      ]);
-
-      return res.status(200).json({
-        success: true,
-        tickets,
-
-        pagination: {
-          page,
-          limit,
-          total,
-
-          pages: Math.ceil(
-            total / limit
-          ),
-        },
-      });
-    } catch (error) {
-      console.error(
-        "Get managed tickets error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Unable to load support tickets.",
-      });
-    }
-  };
-
-/* =====================================
-   Get assignable staff
+   Get assignable support staff
 ===================================== */
 
 export const getAssignableSupportStaff =
@@ -623,17 +562,15 @@ export const getAssignableSupportStaff =
         role: {
           $in: SUPPORT_STAFF_ROLES,
         },
-
         isActive: true,
       })
         .select(
-          "fullName email phone role profileImage isActive"
+          "_id fullName email phone role profileImage isActive"
         )
         .sort({
           role: 1,
           fullName: 1,
-        })
-        .lean();
+        });
 
       return res.status(200).json({
         success: true,
@@ -655,15 +592,167 @@ export const getAssignableSupportStaff =
   };
 
 /* =====================================
+   Get managed support tickets
+===================================== */
+
+export const getManagedSupportTickets =
+  async (req, res) => {
+    try {
+      const {
+        status,
+        priority,
+        category,
+        assignedTo,
+        search,
+      } = req.query;
+
+      const { page, limit, skip } =
+        getPaginationValues(req.query);
+
+      const filter = {};
+
+      if (status) {
+        if (
+          !TICKET_STATUSES.includes(status)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid ticket status.",
+          });
+        }
+
+        filter.status = status;
+      }
+
+      if (priority) {
+        if (
+          !TICKET_PRIORITIES.includes(
+            priority
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid ticket priority.",
+          });
+        }
+
+        filter.priority = priority;
+      }
+
+      if (category) {
+        if (
+          !TICKET_CATEGORIES.includes(
+            category
+          )
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid ticket category.",
+          });
+        }
+
+        filter.category = category;
+      }
+
+      if (assignedTo) {
+        if (assignedTo === "unassigned") {
+          filter.assignedTo = null;
+        } else {
+          if (
+            !isValidObjectId(assignedTo)
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid assigned staff ID.",
+            });
+          }
+
+          filter.assignedTo = assignedTo;
+        }
+      }
+
+      if (search?.trim()) {
+        const safeSearch =
+          escapeRegularExpression(
+            search.trim()
+          );
+
+        filter.$or = [
+          {
+            ticketReference: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            subject: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+          {
+            description: {
+              $regex: safeSearch,
+              $options: "i",
+            },
+          },
+        ];
+      }
+
+      const [tickets, totalTickets] =
+        await Promise.all([
+          populateTicketQuery(
+            SupportTicket.find(filter)
+          )
+            .sort({
+              priority: -1,
+              lastActivityAt: -1,
+              createdAt: -1,
+            })
+            .skip(skip)
+            .limit(limit),
+
+          SupportTicket.countDocuments(
+            filter
+          ),
+        ]);
+
+      return res.status(200).json({
+        success: true,
+        count: tickets.length,
+        totalTickets,
+        currentPage: page,
+        totalPages: Math.ceil(
+          totalTickets / limit
+        ),
+        tickets,
+      });
+    } catch (error) {
+      console.error(
+        "Get managed support tickets error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to load managed support tickets.",
+      });
+    }
+  };
+
+/* =====================================
    Get one support ticket
 ===================================== */
 
 export const getSupportTicketById =
   async (req, res) => {
     try {
-      const {
-        id,
-      } = req.params;
+      const { id } = req.params;
 
       if (!isValidObjectId(id)) {
         return res.status(400).json({
@@ -685,30 +774,25 @@ export const getSupportTicketById =
       }
 
       if (
-        !canAccessTicket(
-          ticket,
-          req.user
-        )
+        !canAccessTicket(ticket, req.user)
       ) {
         return res.status(403).json({
           success: false,
           message:
-            "You do not have permission to view this ticket.",
+            "You do not have permission to view this support ticket.",
         });
       }
 
-      /*
-       * Internal notes must not be exposed
-       * to customers or owners.
-       */
+      const ticketResponse =
+        ticket.toObject();
 
       if (!isSupportStaff(req.user)) {
-        ticket.internalNotes = [];
+        delete ticketResponse.internalNotes;
       }
 
       return res.status(200).json({
         success: true,
-        ticket,
+        ticket: ticketResponse,
       });
     } catch (error) {
       console.error(
@@ -731,19 +815,16 @@ export const getSupportTicketById =
 export const replyToSupportTicket =
   async (req, res) => {
     try {
-      const {
-        id,
-      } = req.params;
+      const { id } = req.params;
 
       const message =
         req.body.message?.trim();
 
-      const attachments =
-        Array.isArray(
-          req.body.attachments
-        )
-          ? req.body.attachments
-          : [];
+      const attachments = Array.isArray(
+        req.body.attachments
+      )
+        ? req.body.attachments
+        : [];
 
       if (!isValidObjectId(id)) {
         return res.status(400).json({
@@ -761,11 +842,11 @@ export const replyToSupportTicket =
         });
       }
 
-      if (message.length > 5000) {
+      if (message.length > 3000) {
         return res.status(400).json({
           success: false,
           message:
-            "Reply message cannot exceed 5000 characters.",
+            "Reply message cannot exceed 3000 characters.",
         });
       }
 
@@ -781,10 +862,7 @@ export const replyToSupportTicket =
       }
 
       if (
-        !canAccessTicket(
-          ticket,
-          req.user
-        )
+        !canAccessTicket(ticket, req.user)
       ) {
         return res.status(403).json({
           success: false,
@@ -810,21 +888,16 @@ export const replyToSupportTicket =
 
       ticket.messages.push({
         sender: req.user._id,
-        senderRole: req.user.role,
         message,
         attachments,
         isStaffReply: staffReply,
       });
 
-      ticket.lastReplyAt =
-        new Date();
-
       if (
         staffReply &&
         ticket.status === "open"
       ) {
-        ticket.status =
-          "in_progress";
+        ticket.status = "assigned";
       }
 
       if (
@@ -835,15 +908,20 @@ export const replyToSupportTicket =
         ticket.status = "open";
       }
 
+      if (
+        !staffReply &&
+        ticket.status ===
+          "waiting_for_owner"
+      ) {
+        ticket.status = "open";
+      }
+
+      ticket.lastActivityAt = new Date();
+
       await ticket.save();
 
       const populatedTicket =
         await findPopulatedTicket(id);
-
-      if (!staffReply) {
-        populatedTicket.internalNotes =
-          [];
-      }
 
       return res.status(200).json({
         success: true,
@@ -853,14 +931,21 @@ export const replyToSupportTicket =
       });
     } catch (error) {
       console.error(
-        "Reply to ticket error:",
+        "Reply to support ticket error:",
         error
       );
+
+      if (error.name === "ValidationError") {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
       return res.status(500).json({
         success: false,
         message:
-          "Unable to add ticket reply.",
+          "Unable to add support-ticket reply.",
       });
     }
   };
@@ -872,13 +957,8 @@ export const replyToSupportTicket =
 export const assignSupportTicket =
   async (req, res) => {
     try {
-      const {
-        id,
-      } = req.params;
-
-      const {
-        assignedTo,
-      } = req.body;
+      const { id } = req.params;
+      const { assignedTo } = req.body;
 
       if (!isValidObjectId(id)) {
         return res.status(400).json({
@@ -899,14 +979,18 @@ export const assignSupportTicket =
         });
       }
 
-      /*
-       * Allow null or an empty value to
-       * unassign the ticket.
-       */
-
-      if (!assignedTo) {
+      if (
+        assignedTo === null ||
+        assignedTo === "" ||
+        assignedTo === undefined
+      ) {
         ticket.assignedTo = null;
-        ticket.assignedAt = null;
+
+        if (ticket.status === "assigned") {
+          ticket.status = "open";
+        }
+
+        ticket.lastActivityAt = new Date();
 
         await ticket.save();
 
@@ -916,31 +1000,25 @@ export const assignSupportTicket =
         return res.status(200).json({
           success: true,
           message:
-            "Ticket assignment removed.",
+            "Support ticket unassigned successfully.",
           ticket: populatedTicket,
         });
       }
 
-      if (
-        !isValidObjectId(
-          assignedTo
-        )
-      ) {
+      if (!isValidObjectId(assignedTo)) {
         return res.status(400).json({
           success: false,
           message:
-            "Invalid staff member ID.",
+            "Invalid support staff ID.",
         });
       }
 
       const staffMember =
         await User.findOne({
           _id: assignedTo,
-
           role: {
             $in: SUPPORT_STAFF_ROLES,
           },
-
           isActive: true,
         }).select(
           "_id fullName email role isActive"
@@ -957,13 +1035,11 @@ export const assignSupportTicket =
       ticket.assignedTo =
         staffMember._id;
 
-      ticket.assignedAt =
-        new Date();
-
       if (ticket.status === "open") {
-        ticket.status =
-          "in_progress";
+        ticket.status = "assigned";
       }
+
+      ticket.lastActivityAt = new Date();
 
       await ticket.save();
 
@@ -972,10 +1048,7 @@ export const assignSupportTicket =
 
       return res.status(200).json({
         success: true,
-
-        message:
-          `Ticket assigned to ${staffMember.fullName}.`,
-
+        message: `Ticket assigned to ${staffMember.fullName}.`,
         ticket: populatedTicket,
       });
     } catch (error) {
@@ -983,6 +1056,13 @@ export const assignSupportTicket =
         "Assign support ticket error:",
         error
       );
+
+      if (error.name === "ValidationError") {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
       return res.status(500).json({
         success: false,
@@ -993,20 +1073,20 @@ export const assignSupportTicket =
   };
 
 /* =====================================
-   Update ticket
+   Update support ticket
 ===================================== */
 
 export const updateSupportTicket =
   async (req, res) => {
     try {
-      const {
-        id,
-      } = req.params;
+      const { id } = req.params;
 
       const {
         status,
         priority,
         category,
+        escalationReason,
+        escalatedTo,
       } = req.body;
 
       if (!isValidObjectId(id)) {
@@ -1030,9 +1110,7 @@ export const updateSupportTicket =
 
       if (status) {
         if (
-          !TICKET_STATUSES.includes(
-            status
-          )
+          !TICKET_STATUSES.includes(status)
         ) {
           return res.status(400).json({
             success: false,
@@ -1044,27 +1122,17 @@ export const updateSupportTicket =
         ticket.status = status;
 
         if (status === "resolved") {
-          ticket.resolvedAt =
-            new Date();
-
-          ticket.resolvedBy =
-            req.user._id;
-
-          ticket.closedAt = null;
-          ticket.closedBy = null;
-        } else if (
-          status === "closed"
-        ) {
-          ticket.closedAt =
-            new Date();
-
-          ticket.closedBy =
-            req.user._id;
+          ticket.resolvedAt = new Date();
+          ticket.resolvedBy = req.user._id;
         } else {
           ticket.resolvedAt = null;
           ticket.resolvedBy = null;
+        }
+
+        if (status === "closed") {
+          ticket.closedAt = new Date();
+        } else {
           ticket.closedAt = null;
-          ticket.closedBy = null;
         }
       }
 
@@ -1100,6 +1168,42 @@ export const updateSupportTicket =
         ticket.category = category;
       }
 
+      if (
+        escalationReason !== undefined
+      ) {
+        const cleanedReason =
+          escalationReason?.trim() || "";
+
+        if (cleanedReason.length > 1000) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Escalation reason cannot exceed 1000 characters.",
+          });
+        }
+
+        ticket.escalationReason =
+          cleanedReason;
+      }
+
+      if (escalatedTo !== undefined) {
+        if (
+          escalatedTo &&
+          !isValidObjectId(escalatedTo)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid escalation staff ID.",
+          });
+        }
+
+        ticket.escalatedTo =
+          escalatedTo || null;
+      }
+
+      ticket.lastActivityAt = new Date();
+
       await ticket.save();
 
       const populatedTicket =
@@ -1117,6 +1221,13 @@ export const updateSupportTicket =
         error
       );
 
+      if (error.name === "ValidationError") {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
       return res.status(500).json({
         success: false,
         message:
@@ -1129,85 +1240,93 @@ export const updateSupportTicket =
    Add internal staff note
 ===================================== */
 
-export const addInternalNote =
-  async (req, res) => {
-    try {
-      const {
-        id,
-      } = req.params;
+export const addInternalNote = async (
+  req,
+  res
+) => {
+  try {
+    const { id } = req.params;
 
-      const note =
-        req.body.note?.trim();
+    const note = req.body.note?.trim();
 
-      if (!isValidObjectId(id)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid support-ticket ID.",
-        });
-      }
-
-      if (!note) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Internal note is required.",
-        });
-      }
-
-      if (note.length > 3000) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Internal note cannot exceed 3000 characters.",
-        });
-      }
-
-      if (!isSupportStaff(req.user)) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "Only authorized staff can add internal notes.",
-        });
-      }
-
-      const ticket =
-        await SupportTicket.findById(id);
-
-      if (!ticket) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Support ticket not found.",
-        });
-      }
-
-      ticket.internalNotes.push({
-        addedBy: req.user._id,
-        note,
-      });
-
-      await ticket.save();
-
-      const populatedTicket =
-        await findPopulatedTicket(id);
-
-      return res.status(200).json({
-        success: true,
-        message:
-          "Internal note added successfully.",
-        ticket: populatedTicket,
-      });
-    } catch (error) {
-      console.error(
-        "Add internal note error:",
-        error
-      );
-
-      return res.status(500).json({
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
         success: false,
         message:
-          "Unable to add internal note.",
+          "Invalid support-ticket ID.",
       });
     }
-  };
+
+    if (!note) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Internal note is required.",
+      });
+    }
+
+    if (note.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Internal note cannot exceed 2000 characters.",
+      });
+    }
+
+    if (!isSupportStaff(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only authorized staff can add internal notes.",
+      });
+    }
+
+    const ticket =
+      await SupportTicket.findById(id);
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Support ticket not found.",
+      });
+    }
+
+    ticket.internalNotes.push({
+      addedBy: req.user._id,
+      note,
+    });
+
+    ticket.lastActivityAt = new Date();
+
+    await ticket.save();
+
+    const populatedTicket =
+      await findPopulatedTicket(id);
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Internal note added successfully.",
+      ticket: populatedTicket,
+    });
+  } catch (error) {
+    console.error(
+      "Add internal note error:",
+      error
+    );
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Unable to add internal note.",
+    });
+  }
+};
