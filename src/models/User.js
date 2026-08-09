@@ -1,6 +1,27 @@
 import mongoose from "mongoose";
 
 /* =====================================
+   Available user roles
+===================================== */
+
+export const USER_ROLES = Object.freeze({
+  CUSTOMER: "customer",
+  OWNER: "owner",
+  SUPPORT: "support",
+  ADMIN: "admin",
+  PROPERTY_ADMIN: "property_admin",
+  BOOKING_MANAGER: "booking_manager",
+  FINANCE_MANAGER: "finance_manager",
+  OPERATIONS_MANAGER:
+    "operations_manager",
+  SUPER_ADMIN: "super_admin",
+});
+
+const allowedRoles = Object.values(
+  USER_ROLES
+);
+
+/* =====================================
    Remove private user fields
 ===================================== */
 
@@ -9,13 +30,15 @@ const removePrivateFields = (
   returnedObject
 ) => {
   delete returnedObject.password;
-
   delete returnedObject.tokenVersion;
-
   delete returnedObject.__v;
 
   return returnedObject;
 };
+
+/* =====================================
+   User schema
+===================================== */
 
 const userSchema =
   new mongoose.Schema(
@@ -62,7 +85,6 @@ const userSchema =
 
         match: [
           /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-
           "Please provide a valid email address.",
         ],
       },
@@ -81,7 +103,6 @@ const userSchema =
 
         match: [
           /^\+?[0-9]{10,15}$/,
-
           "Please provide a valid phone number.",
         ],
       },
@@ -120,19 +141,15 @@ const userSchema =
       role: {
         type: String,
 
-        enum: [
-          "customer",
-          "owner",
-          "support",
-          "property_admin",
-          "booking_manager",
-          "finance_manager",
-          "operations_manager",
-          "super_admin",
-        ],
+        enum: {
+          values: allowedRoles,
+
+          message:
+            "{VALUE} is not a supported user role.",
+        },
 
         default:
-          "customer",
+          USER_ROLES.CUSTOMER,
 
         index: true,
       },
@@ -226,6 +243,40 @@ const userSchema =
   );
 
 /* =====================================
+   Normalize user information
+===================================== */
+
+userSchema.pre(
+  "validate",
+  function normalizeUserFields(next) {
+    if (
+      typeof this.fullName === "string"
+    ) {
+      this.fullName =
+        this.fullName.trim();
+    }
+
+    if (
+      typeof this.email === "string"
+    ) {
+      this.email = this.email
+        .trim()
+        .toLowerCase();
+    }
+
+    if (
+      typeof this.phone === "string"
+    ) {
+      this.phone = this.phone
+        .replace(/\s+/g, "")
+        .trim();
+    }
+
+    next();
+  }
+);
+
+/* =====================================
    Database indexes
 ===================================== */
 
@@ -244,14 +295,17 @@ userSchema.index({
 
 userSchema
   .virtual("displayName")
-  .get(function () {
+  .get(function getDisplayName() {
     return this.fullName;
   });
 
-const User =
-  mongoose.model(
-    "User",
-    userSchema
-  );
+/* =====================================
+   User model
+===================================== */
+
+const User = mongoose.model(
+  "User",
+  userSchema
+);
 
 export default User;
