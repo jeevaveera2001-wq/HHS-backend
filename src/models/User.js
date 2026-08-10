@@ -4,22 +4,40 @@ import mongoose from "mongoose";
    Available user roles
 ===================================== */
 
-export const USER_ROLES = Object.freeze({
-  CUSTOMER: "customer",
-  OWNER: "owner",
-  SUPPORT: "support",
-  ADMIN: "admin",
-  PROPERTY_ADMIN: "property_admin",
-  BOOKING_MANAGER: "booking_manager",
-  FINANCE_MANAGER: "finance_manager",
-  OPERATIONS_MANAGER:
-    "operations_manager",
-  SUPER_ADMIN: "super_admin",
-});
+export const USER_ROLES =
+  Object.freeze({
+    CUSTOMER:
+      "customer",
 
-const allowedRoles = Object.values(
-  USER_ROLES
-);
+    OWNER:
+      "owner",
+
+    SUPPORT:
+      "support",
+
+    ADMIN:
+      "admin",
+
+    PROPERTY_ADMIN:
+      "property_admin",
+
+    BOOKING_MANAGER:
+      "booking_manager",
+
+    FINANCE_MANAGER:
+      "finance_manager",
+
+    OPERATIONS_MANAGER:
+      "operations_manager",
+
+    SUPER_ADMIN:
+      "super_admin",
+  });
+
+const allowedRoles =
+  Object.values(
+    USER_ROLES
+  );
 
 /* =====================================
    Remove private user fields
@@ -30,7 +48,13 @@ const removePrivateFields = (
   returnedObject
 ) => {
   delete returnedObject.password;
-  delete returnedObject.tokenVersion;
+
+  delete returnedObject
+    .tokenVersion;
+
+  delete returnedObject
+    .googleId;
+
   delete returnedObject.__v;
 
   return returnedObject;
@@ -85,35 +109,62 @@ const userSchema =
 
         match: [
           /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+
           "Please provide a valid email address.",
         ],
       },
 
+      /*
+       * Google does not provide a phone
+       * number during authentication.
+       *
+       * Phone remains required for normal
+       * email/password registration.
+       */
+
       phone: {
         type: String,
 
-        required: [
-          true,
-          "Phone number is required.",
-        ],
+        required:
+          function requirePhoneForLocalAccount() {
+            return (
+              this.authProvider ===
+              "local"
+            );
+          },
 
         unique: true,
+
+        sparse: true,
 
         trim: true,
 
         match: [
           /^\+?[0-9]{10,15}$/,
+
           "Please provide a valid phone number.",
         ],
+
+        default:
+          undefined,
       },
+
+      /*
+       * Password remains mandatory for
+       * normal accounts but is not stored
+       * for Google-only accounts.
+       */
 
       password: {
         type: String,
 
-        required: [
-          true,
-          "Password is required.",
-        ],
+        required:
+          function requirePasswordForLocalAccount() {
+            return (
+              this.authProvider ===
+              "local"
+            );
+          },
 
         minlength: [
           8,
@@ -124,6 +175,42 @@ const userSchema =
           128,
           "Password is too long.",
         ],
+
+        select: false,
+
+        default:
+          undefined,
+      },
+
+      /* =================================
+         Authentication provider
+      ================================= */
+
+      authProvider: {
+        type: String,
+
+        enum: [
+          "local",
+          "google",
+        ],
+
+        default:
+          "local",
+
+        index: true,
+      },
+
+      googleId: {
+        type: String,
+
+        unique: true,
+
+        sparse: true,
+
+        trim: true,
+
+        default:
+          undefined,
 
         select: false,
       },
@@ -142,14 +229,16 @@ const userSchema =
         type: String,
 
         enum: {
-          values: allowedRoles,
+          values:
+            allowedRoles,
 
           message:
             "{VALUE} is not a supported user role.",
         },
 
         default:
-          USER_ROLES.CUSTOMER,
+          USER_ROLES
+            .CUSTOMER,
 
         index: true,
       },
@@ -157,6 +246,7 @@ const userSchema =
       customPermissions: [
         {
           type: String,
+
           trim: true,
         },
       ],
@@ -164,14 +254,15 @@ const userSchema =
       revokedPermissions: [
         {
           type: String,
+
           trim: true,
         },
       ],
 
       createdBy: {
         type:
-          mongoose.Schema.Types
-            .ObjectId,
+          mongoose.Schema
+            .Types.ObjectId,
 
         ref: "User",
 
@@ -189,10 +280,11 @@ const userSchema =
       savedProperties: [
         {
           type:
-            mongoose.Schema.Types
-              .ObjectId,
+            mongoose.Schema
+              .Types.ObjectId,
 
-          ref: "Property",
+          ref:
+            "Property",
         },
       ],
 
@@ -203,6 +295,11 @@ const userSchema =
 
         index: true,
       },
+
+      /*
+       * Google verifies ownership of the
+       * email address before returning it.
+       */
 
       isVerified: {
         type: Boolean,
@@ -248,28 +345,58 @@ const userSchema =
 
 userSchema.pre(
   "validate",
-  function normalizeUserFields(next) {
+
+  function normalizeUserFields(
+    next
+  ) {
     if (
-      typeof this.fullName === "string"
+      typeof this.fullName ===
+      "string"
     ) {
       this.fullName =
         this.fullName.trim();
     }
 
     if (
-      typeof this.email === "string"
+      typeof this.email ===
+      "string"
     ) {
-      this.email = this.email
-        .trim()
-        .toLowerCase();
+      this.email =
+        this.email
+          .trim()
+          .toLowerCase();
     }
 
     if (
-      typeof this.phone === "string"
+      typeof this.phone ===
+      "string"
     ) {
-      this.phone = this.phone
-        .replace(/\s+/g, "")
-        .trim();
+      this.phone =
+        this.phone
+          .replace(
+            /\s+/g,
+            ""
+          )
+          .trim();
+
+      if (!this.phone) {
+        this.phone =
+          undefined;
+      }
+    }
+
+    if (
+      typeof this.googleId ===
+      "string"
+    ) {
+      this.googleId =
+        this.googleId
+          .trim();
+
+      if (!this.googleId) {
+        this.googleId =
+          undefined;
+      }
     }
 
     next();
@@ -294,18 +421,23 @@ userSchema.index({
 ===================================== */
 
 userSchema
-  .virtual("displayName")
-  .get(function getDisplayName() {
-    return this.fullName;
-  });
+  .virtual(
+    "displayName"
+  )
+  .get(
+    function getDisplayName() {
+      return this.fullName;
+    }
+  );
 
 /* =====================================
    User model
 ===================================== */
 
-const User = mongoose.model(
-  "User",
-  userSchema
-);
+const User =
+  mongoose.model(
+    "User",
+    userSchema
+  );
 
 export default User;

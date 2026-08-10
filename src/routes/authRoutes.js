@@ -3,6 +3,7 @@ import express from "express";
 import {
   register,
   login,
+  googleLogin,
   verifyEmail,
   resendVerificationEmail,
   forgotPassword,
@@ -53,6 +54,19 @@ router.post(
   "/login",
   validateLogin,
   login
+);
+
+/*
+ * The Google credential is validated
+ * by Google and authController.
+ *
+ * Do not use validateLogin here because
+ * Google login has no email/password.
+ */
+
+router.post(
+  "/google",
+  googleLogin
 );
 
 /* =====================================
