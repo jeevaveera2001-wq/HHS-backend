@@ -25,6 +25,17 @@ const normalizeStringArray = (value) => {
   }
 
   if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => String(item).trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Not a valid JSON string; fallback to comma split
+    }
+
     return value
       .split(",")
       .map((item) => item.trim())
@@ -34,10 +45,7 @@ const normalizeStringArray = (value) => {
   return [];
 };
 
-const normalizeBoolean = (
-  value,
-  defaultValue = false
-) => {
+const normalizeBoolean = (value, defaultValue = false) => {
   if (typeof value === "boolean") {
     return value;
   }
@@ -62,11 +70,7 @@ const sanitizeImages = (images) => {
     .filter((image) => image?.url)
     .map((image) => ({
       url: String(image.url).trim(),
-
-      publicId: image.publicId
-        ? String(image.publicId).trim()
-        : "",
-
+      publicId: image.publicId ? String(image.publicId).trim() : "",
       isCover: Boolean(image.isCover),
     }));
 
@@ -74,89 +78,73 @@ const sanitizeImages = (images) => {
     return [];
   }
 
-  const coverImageIndex = filteredImages.findIndex(
-    (image) => image.isCover
-  );
+  const coverImageIndex = filteredImages.findIndex((image) => image.isCover);
 
   return filteredImages.map((image, index) => ({
     ...image,
-
-    isCover:
-      coverImageIndex === -1
-        ? index === 0
-        : index === coverImageIndex,
+    isCover: coverImageIndex === -1 ? index === 0 : index === coverImageIndex,
   }));
 };
 
+/**
+ * Normalizes location payload from JSON object or FormData string,
+ * converting coordinates (lat/lng or latitude/longitude) to numeric values.
+ */
 const parseLocation = (location = {}) => {
+  let loc = location;
+
+  if (typeof location === "string") {
+    try {
+      loc = JSON.parse(location);
+    } catch {
+      loc = {};
+    }
+  }
+
+  const rawCoords = loc?.coordinates || {};
+  const rawLat = rawCoords.lat ?? rawCoords.latitude;
+  const rawLng = rawCoords.lng ?? rawCoords.longitude;
+
+  const latNum =
+    rawLat !== undefined && rawLat !== null && rawLat !== ""
+      ? Number(rawLat)
+      : null;
+
+  const lngNum =
+    rawLng !== undefined && rawLng !== null && rawLng !== ""
+      ? Number(rawLng)
+      : null;
+
   return {
-    address: location.address?.trim() || "",
-
-    city:
-      location.city?.trim() ||
-      "Hogenakkal",
-
-    district:
-      location.district?.trim() ||
-      "Dharmapuri",
-
-    state:
-      location.state?.trim() ||
-      "Tamil Nadu",
-
-    pincode: location.pincode?.trim() || "",
-
+    address: loc?.address?.trim() || "",
+    city: loc?.city?.trim() || "Hogenakkal",
+    district: loc?.district?.trim() || "Dharmapuri",
+    state: loc?.state?.trim() || "Tamil Nadu",
+    pincode: loc?.pincode?.trim() || "",
     coordinates: {
-      latitude:
-        location.coordinates?.latitude !==
-          undefined &&
-        location.coordinates?.latitude !== ""
-          ? Number(
-              location.coordinates.latitude
-            )
-          : undefined,
-
-      longitude:
-        location.coordinates?.longitude !==
-          undefined &&
-        location.coordinates?.longitude !== ""
-          ? Number(
-              location.coordinates.longitude
-            )
-          : undefined,
+      lat: Number.isNaN(latNum) ? null : latNum,
+      lng: Number.isNaN(lngNum) ? null : lngNum,
     },
   };
 };
 
-const canManageProperty = (
-  property,
-  user
-) => {
+const canManageProperty = (property, user) => {
   if (!property || !user) {
     return false;
   }
 
-  if (
-    user.role === "admin" ||
-    user.role === "super_admin"
-  ) {
+  if (user.role === "admin" || user.role === "super_admin") {
     return true;
   }
 
   const userId = user._id || user.id;
-
-  const ownerId =
-    property.owner?._id ||
-    property.owner;
+  const ownerId = property.owner?._id || property.owner;
 
   if (!userId || !ownerId) {
     return false;
   }
 
-  return (
-    ownerId.toString() ===
-    userId.toString()
-  );
+  return ownerId.toString() === userId.toString();
 };
 
 /* =====================================================
@@ -165,10 +153,7 @@ const canManageProperty = (
    Owner/Admin
 ===================================================== */
 
-export const createProperty = async (
-  req,
-  res
-) => {
+export const createProperty = async (req, res) => {
   try {
     const userId = getUserId(req);
 
@@ -192,36 +177,24 @@ export const createProperty = async (
       totalRooms,
       availableRooms,
       amenities,
-      images,
       rules,
       checkInTime,
       checkOutTime,
     } = req.body;
 
+    const uploadedImages = (req.files || []).map((file, index) => ({
+      url: file.path || file.secure_url || file.url,
+      publicId: file.filename || file.public_id || "",
+      isCover: index === 0,
+    }));
 
-//    const uploadedImages = (req.files || []).map((file, index) => ({
-//   url: `/uploads/properties/${file.filename}`,
-//   isCover: index === 0,
-// }));
+    const parsedLocation = parseLocation(location);
 
-const uploadedImages = (req.files || []).map((file, index) => ({
-     // Cloudinary provides the full secure URL in the file.path property
-     url: file.path, 
-     isCover: index === 0,
-   }));
-
-   console.log("Uploaded images:", uploadedImages);
-
-let modifylocation = typeof location === "string"
-  ? JSON.parse(location)
-  : location;
-   console.log("+++++++++++++++Uploaded images:", uploadedImages);
-   console.log("++++++++++++++Form data:", req.body,modifylocation);
     if (
       !title ||
       !description ||
       !propertyType ||
-      !modifylocation?.address ||
+      !parsedLocation?.address ||
       pricePerNight === undefined ||
       maxGuests === undefined ||
       bedrooms === undefined ||
@@ -231,20 +204,24 @@ let modifylocation = typeof location === "string"
     ) {
       return res.status(400).json({
         success: false,
-
-        message:
-          "Please provide all required property information.",
+        message: "Please provide all required property information.",
       });
     }
 
-    const numericTotalRooms =
-      Number(totalRooms);
+    // Coordinates check
+    if (
+      parsedLocation.coordinates.lat === null ||
+      parsedLocation.coordinates.lng === null
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please pinpoint the exact map location coordinates (lat, lng).",
+      });
+    }
 
-    const numericAvailableRooms =
-      Number(availableRooms);
-
-    const numericPrice =
-      Number(pricePerNight);
+    const numericTotalRooms = Number(totalRooms);
+    const numericAvailableRooms = Number(availableRooms);
+    const numericPrice = Number(pricePerNight);
 
     if (
       Number.isNaN(numericTotalRooms) ||
@@ -253,21 +230,14 @@ let modifylocation = typeof location === "string"
     ) {
       return res.status(400).json({
         success: false,
-
-        message:
-          "Price and room values must be valid numbers.",
+        message: "Price and room values must be valid numbers.",
       });
     }
 
-    if (
-      numericAvailableRooms >
-      numericTotalRooms
-    ) {
+    if (numericAvailableRooms > numericTotalRooms) {
       return res.status(400).json({
         success: false,
-
-        message:
-          "Available rooms cannot exceed total rooms.",
+        message: "Available rooms cannot exceed total rooms.",
       });
     }
 
@@ -279,150 +249,78 @@ let modifylocation = typeof location === "string"
     ) {
       return res.status(400).json({
         success: false,
-
-        message:
-          "Original price cannot be lower than the current price.",
+        message: "Original price cannot be lower than the current price.",
       });
     }
 
-    const property =
-      await Property.create({
-        title: title.trim(),
+    const property = await Property.create({
+      title: title.trim(),
+      description: description.trim(),
+      propertyType,
+      location: parsedLocation,
+      pricePerNight: numericPrice,
+      originalPrice:
+        originalPrice !== undefined &&
+        originalPrice !== null &&
+        originalPrice !== ""
+          ? Number(originalPrice)
+          : null,
+      maxGuests: Number(maxGuests),
+      bedrooms: Number(bedrooms),
+      bathrooms: Number(bathrooms),
+      totalRooms: numericTotalRooms,
+      availableRooms: numericAvailableRooms,
+      amenities: normalizeStringArray(amenities),
+      images: uploadedImages,
+      rules: normalizeStringArray(rules),
+      checkInTime: checkInTime || "12:00 PM",
+      checkOutTime: checkOutTime || "11:00 AM",
+      owner: userId,
+      approvalStatus: "pending",
+      submittedAt: new Date(),
+      reviewedAt: null,
+      reviewedBy: null,
+      rejectionReason: "",
+      approvalNote: "",
+      approvalHistory: [
+        {
+          status: "pending",
+          note: "Property submitted for approval.",
+          reviewedBy: null,
+          reviewedAt: new Date(),
+        },
+      ],
+    });
 
-        description:
-          description.trim(),
-
-        propertyType,
-
-        location:
-          parseLocation(modifylocation),
-
-        pricePerNight:
-          numericPrice,
-
-        originalPrice:
-          originalPrice !== undefined &&
-          originalPrice !== null &&
-          originalPrice !== ""
-            ? Number(originalPrice)
-            : null,
-
-        maxGuests:
-          Number(maxGuests),
-
-        bedrooms:
-          Number(bedrooms),
-
-        bathrooms:
-          Number(bathrooms),
-
-        totalRooms:
-          numericTotalRooms,
-
-        availableRooms:
-          numericAvailableRooms,
-
-        amenities:
-          normalizeStringArray(
-            amenities
-          ),
-
-        images:
-          uploadedImages,
-
-        rules:
-          normalizeStringArray(rules),
-
-        checkInTime:
-          checkInTime ||
-          "12:00 PM",
-
-        checkOutTime:
-          checkOutTime ||
-          "11:00 AM",
-
-        owner: userId,
-
-        approvalStatus: "pending",
-
-        submittedAt:
-          new Date(),
-
-        reviewedAt: null,
-
-        reviewedBy: null,
-
-        rejectionReason: "",
-
-        approvalNote: "",
-
-        approvalHistory: [
-          {
-            status: "pending",
-
-            note:
-              "Property submitted for approval.",
-
-            reviewedBy: null,
-
-            reviewedAt:
-              new Date(),
-          },
-        ],
-      });
-
-    const populatedProperty =
-      await Property.findById(
-        property._id
-      ).populate(
-        "owner",
-        "fullName email phone role"
-      );
+    const populatedProperty = await Property.findById(property._id).populate(
+      "owner",
+      "fullName email phone role"
+    );
 
     return res.status(201).json({
       success: true,
-
       message:
         "Property submitted successfully and is waiting for admin approval.",
-
-      property:
-        populatedProperty,
+      property: populatedProperty,
     });
   } catch (error) {
-    console.error(
-      "Create property error:",
-      error
-    );
+    console.error("Create property error:", error);
 
-    if (
-      error.name ===
-      "ValidationError"
-    ) {
-      const validationErrors =
-        Object.values(
-          error.errors
-        ).map(
-          (item) =>
-            item.message
-        );
+    if (error.name === "ValidationError") {
+      const validationErrors = Object.values(error.errors).map(
+        (item) => item.message
+      );
 
       return res.status(400).json({
         success: false,
-
-        message:
-          validationErrors[0],
-
-        errors:
-          validationErrors,
+        message: validationErrors[0],
+        errors: validationErrors,
       });
     }
 
     return res.status(500).json({
       success: false,
-
-      message:
-        "Unable to create property.",
-
+      message: "Unable to create property.",
       error: error.message,
     });
   }
@@ -434,272 +332,158 @@ let modifylocation = typeof location === "string"
    Public
 ===================================================== */
 
-export const getPublicProperties =
-  async (req, res) => {
-    try {
-      const {
-        search = "",
-        propertyType = "",
-        minPrice,
-        maxPrice,
-        guests,
-        bedrooms,
-        city = "",
-        featured,
-        sort = "newest",
-        page = 1,
-        limit = 12,
-      } = req.query;
+export const getPublicProperties = async (req, res) => {
+  try {
+    const {
+      search = "",
+      propertyType = "",
+      minPrice,
+      maxPrice,
+      guests,
+      bedrooms,
+      city = "",
+      featured,
+      sort = "newest",
+      page = 1,
+      limit = 12,
+    } = req.query;
 
-      const filter = {
-        approvalStatus:
-          "approved",
+    const filter = {
+      approvalStatus: "approved",
+      isActive: true,
+      availableRooms: {
+        $gt: 0,
+      },
+    };
 
-        isActive: true,
-
-        availableRooms: {
-          $gt: 0,
-        },
-      };
-
-      if (
-        String(search).trim()
-      ) {
-        filter.$or = [
-          {
-            title: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+    if (String(search).trim()) {
+      filter.$or = [
+        {
+          title: {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            description: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+        },
+        {
+          description: {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.city": {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+        },
+        {
+          "location.city": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.district":
-              {
-                $regex:
-                  String(
-                    search
-                  ).trim(),
-
-                $options: "i",
-              },
+        },
+        {
+          "location.district": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-        ];
-      }
-
-      if (
-        propertyType &&
-        propertyType !== "all"
-      ) {
-        filter.propertyType =
-          propertyType;
-      }
-
-      if (
-        String(city).trim()
-      ) {
-        filter[
-          "location.city"
-        ] = {
-          $regex:
-            String(city).trim(),
-
-          $options: "i",
-        };
-      }
-
-      if (
-        minPrice !==
-          undefined ||
-        maxPrice !==
-          undefined
-      ) {
-        filter.pricePerNight =
-          {};
-
-        if (
-          minPrice !==
-            undefined &&
-          minPrice !== ""
-        ) {
-          filter.pricePerNight.$gte =
-            Number(minPrice);
-        }
-
-        if (
-          maxPrice !==
-            undefined &&
-          maxPrice !== ""
-        ) {
-          filter.pricePerNight.$lte =
-            Number(maxPrice);
-        }
-      }
-
-      if (guests) {
-        filter.maxGuests = {
-          $gte:
-            Number(guests),
-        };
-      }
-
-      if (bedrooms) {
-        filter.bedrooms = {
-          $gte:
-            Number(bedrooms),
-        };
-      }
-
-      if (
-        featured === "true"
-      ) {
-        filter.isFeatured =
-          true;
-      }
-
-      const sortOptions = {
-        newest: {
-          isFeatured: -1,
-          createdAt: -1,
         },
-
-        oldest: {
-          createdAt: 1,
-        },
-
-        priceLow: {
-          pricePerNight: 1,
-        },
-
-        priceHigh: {
-          pricePerNight: -1,
-        },
-
-        rating: {
-          rating: -1,
-          totalReviews: -1,
-        },
-      };
-
-      const selectedSort =
-        sortOptions[sort] ||
-        sortOptions.newest;
-
-      const currentPage =
-        Math.max(
-          Number(page) || 1,
-          1
-        );
-
-      const pageSize =
-        Math.min(
-          Math.max(
-            Number(limit) || 12,
-            1
-          ),
-          50
-        );
-
-      const skip =
-        (currentPage - 1) *
-        pageSize;
-
-      const [
-        properties,
-        totalProperties,
-      ] = await Promise.all([
-        Property.find(filter)
-          .populate(
-            "owner",
-            "fullName"
-          )
-          .sort(selectedSort)
-          .skip(skip)
-          .limit(pageSize),
-
-        Property.countDocuments(
-          filter
-        ),
-      ]);
-
-      const totalPages =
-        Math.ceil(
-          totalProperties /
-            pageSize
-        );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          count:
-            properties.length,
-
-          properties,
-
-          pagination: {
-            currentPage,
-
-            totalPages,
-
-            totalProperties,
-
-            pageSize,
-
-            hasNextPage:
-              currentPage <
-              totalPages,
-
-            hasPreviousPage:
-              currentPage > 1,
-          },
-        });
-    } catch (error) {
-      console.error(
-        "Get public properties error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load properties.",
-
-          error:
-            error.message,
-        });
+      ];
     }
-  };
+
+    if (propertyType && propertyType !== "all") {
+      filter.propertyType = propertyType;
+    }
+
+    if (String(city).trim()) {
+      filter["location.city"] = {
+        $regex: String(city).trim(),
+        $options: "i",
+      };
+    }
+
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      filter.pricePerNight = {};
+
+      if (minPrice !== undefined && minPrice !== "") {
+        filter.pricePerNight.$gte = Number(minPrice);
+      }
+
+      if (maxPrice !== undefined && maxPrice !== "") {
+        filter.pricePerNight.$lte = Number(maxPrice);
+      }
+    }
+
+    if (guests) {
+      filter.maxGuests = {
+        $gte: Number(guests),
+      };
+    }
+
+    if (bedrooms) {
+      filter.bedrooms = {
+        $gte: Number(bedrooms),
+      };
+    }
+
+    if (featured === "true") {
+      filter.isFeatured = true;
+    }
+
+    const sortOptions = {
+      newest: {
+        isFeatured: -1,
+        createdAt: -1,
+      },
+      oldest: {
+        createdAt: 1,
+      },
+      priceLow: {
+        pricePerNight: 1,
+      },
+      priceHigh: {
+        pricePerNight: -1,
+      },
+      rating: {
+        rating: -1,
+        totalReviews: -1,
+      },
+    };
+
+    const selectedSort = sortOptions[sort] || sortOptions.newest;
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 12, 1), 50);
+    const skip = (currentPage - 1) * pageSize;
+
+    const [properties, totalProperties] = await Promise.all([
+      Property.find(filter)
+        .populate("owner", "fullName")
+        .sort(selectedSort)
+        .skip(skip)
+        .limit(pageSize),
+      Property.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(totalProperties / pageSize);
+
+    return res.status(200).json({
+      success: true,
+      count: properties.length,
+      properties,
+      pagination: {
+        currentPage,
+        totalPages,
+        totalProperties,
+        pageSize,
+        hasNextPage: currentPage < totalPages,
+        hasPreviousPage: currentPage > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Get public properties error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load properties.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Get featured properties
@@ -707,72 +491,40 @@ export const getPublicProperties =
    Public
 ===================================================== */
 
-export const getFeaturedProperties =
-  async (req, res) => {
-    try {
-      const limit =
-        Math.min(
-          Math.max(
-            Number(
-              req.query.limit
-            ) || 6,
-            1
-          ),
-          20
-        );
+export const getFeaturedProperties = async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 6, 1), 20);
 
-      const properties =
-        await Property.find({
-          approvalStatus:
-            "approved",
+    const properties = await Property.find({
+      approvalStatus: "approved",
+      isActive: true,
+      isFeatured: true,
+      availableRooms: {
+        $gt: 0,
+      },
+    })
+      .populate("owner", "fullName")
+      .sort({
+        rating: -1,
+        createdAt: -1,
+      })
+      .limit(limit);
 
-          isActive: true,
+    return res.status(200).json({
+      success: true,
+      count: properties.length,
+      properties,
+    });
+  } catch (error) {
+    console.error("Get featured properties error:", error);
 
-          isFeatured: true,
-
-          availableRooms: {
-            $gt: 0,
-          },
-        })
-          .populate(
-            "owner",
-            "fullName"
-          )
-          .sort({
-            rating: -1,
-            createdAt: -1,
-          })
-          .limit(limit);
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          count:
-            properties.length,
-
-          properties,
-        });
-    } catch (error) {
-      console.error(
-        "Get featured properties error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load featured properties.",
-
-          error:
-            error.message,
-        });
-    }
-  };
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load featured properties.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Get single public property
@@ -780,76 +532,44 @@ export const getFeaturedProperties =
    Public
 ===================================================== */
 
-export const getPublicPropertyById =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const getPublicPropertyById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findOne(
-          {
-            _id: id,
-
-            approvalStatus:
-              "approved",
-
-            isActive: true,
-          }
-        ).populate(
-          "owner",
-          "fullName"
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property was not found or is currently unavailable.",
-          });
-      }
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-          property,
-        });
-    } catch (error) {
-      console.error(
-        "Get public property error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findOne({
+      _id: id,
+      approvalStatus: "approved",
+      isActive: true,
+    }).populate("owner", "fullName");
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property was not found or is currently unavailable.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      property,
+    });
+  } catch (error) {
+    console.error("Get public property error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Get current owner's properties
@@ -857,234 +577,132 @@ export const getPublicPropertyById =
    Owner
 ===================================================== */
 
-export const getMyProperties =
-  async (req, res) => {
-    try {
-      const userId =
-        getUserId(req);
+export const getMyProperties = async (req, res) => {
+  try {
+    const userId = getUserId(req);
 
-      if (!userId) {
-        return res
-          .status(401)
-          .json({
-            success: false,
-
-            message:
-              "Authentication required.",
-          });
-      }
-
-      const {
-        search = "",
-
-        approvalStatus =
-          "all",
-
-        active = "all",
-
-        page = 1,
-
-        limit = 20,
-      } = req.query;
-
-      const filter = {
-        owner: userId,
-      };
-
-      if (
-        String(search).trim()
-      ) {
-        filter.$or = [
-          {
-            title: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
-          },
-
-          {
-            "location.address":
-              {
-                $regex:
-                  String(
-                    search
-                  ).trim(),
-
-                $options: "i",
-              },
-          },
-
-          {
-            "location.city": {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
-          },
-        ];
-      }
-
-      if (
-        approvalStatus &&
-        approvalStatus !== "all"
-      ) {
-        filter.approvalStatus =
-          approvalStatus;
-      }
-
-      if (
-        active === "true"
-      ) {
-        filter.isActive =
-          true;
-      }
-
-      if (
-        active === "false"
-      ) {
-        filter.isActive =
-          false;
-      }
-
-      const currentPage =
-        Math.max(
-          Number(page) || 1,
-          1
-        );
-
-      const pageSize =
-        Math.min(
-          Math.max(
-            Number(limit) || 20,
-            1
-          ),
-          100
-        );
-
-      const skip =
-        (currentPage - 1) *
-        pageSize;
-
-      const objectUserId =
-        new mongoose.Types.ObjectId(
-          userId
-        );
-
-      const [
-        properties,
-
-        totalProperties,
-
-        statistics,
-      ] = await Promise.all([
-        Property.find(filter)
-          .sort({
-            createdAt: -1,
-          })
-          .skip(skip)
-          .limit(pageSize),
-
-        Property.countDocuments(
-          filter
-        ),
-
-        Property.aggregate([
-          {
-            $match: {
-              owner:
-                objectUserId,
-            },
-          },
-
-          {
-            $group: {
-              _id:
-                "$approvalStatus",
-
-              count: {
-                $sum: 1,
-              },
-            },
-          },
-        ]),
-      ]);
-
-      const stats = {
-        total: 0,
-
-        pending: 0,
-
-        approved: 0,
-
-        rejected: 0,
-      };
-
-      statistics.forEach(
-        (item) => {
-          if (
-            Object.prototype.hasOwnProperty.call(
-              stats,
-              item._id
-            )
-          ) {
-            stats[item._id] =
-              item.count;
-          }
-
-          stats.total +=
-            item.count;
-        }
-      );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          properties,
-
-          statistics: stats,
-
-          pagination: {
-            currentPage,
-
-            totalPages:
-              Math.ceil(
-                totalProperties /
-                  pageSize
-              ),
-
-            totalProperties,
-
-            pageSize,
-          },
-        });
-    } catch (error) {
-      console.error(
-        "Get my properties error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load your properties.",
-
-          error:
-            error.message,
-        });
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
     }
-  };
+
+    const {
+      search = "",
+      approvalStatus = "all",
+      active = "all",
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const filter = {
+      owner: userId,
+    };
+
+    if (String(search).trim()) {
+      filter.$or = [
+        {
+          title: {
+            $regex: String(search).trim(),
+            $options: "i",
+          },
+        },
+        {
+          "location.address": {
+            $regex: String(search).trim(),
+            $options: "i",
+          },
+        },
+        {
+          "location.city": {
+            $regex: String(search).trim(),
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    if (approvalStatus && approvalStatus !== "all") {
+      filter.approvalStatus = approvalStatus;
+    }
+
+    if (active === "true") {
+      filter.isActive = true;
+    }
+
+    if (active === "false") {
+      filter.isActive = false;
+    }
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const skip = (currentPage - 1) * pageSize;
+
+    const objectUserId = new mongoose.Types.ObjectId(userId);
+
+    const [properties, totalProperties, statistics] = await Promise.all([
+      Property.find(filter)
+        .sort({
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(pageSize),
+
+      Property.countDocuments(filter),
+
+      Property.aggregate([
+        {
+          $match: {
+            owner: objectUserId,
+          },
+        },
+        {
+          $group: {
+            _id: "$approvalStatus",
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+      ]),
+    ]);
+
+    const stats = {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+    };
+
+    statistics.forEach((item) => {
+      if (Object.prototype.hasOwnProperty.call(stats, item._id)) {
+        stats[item._id] = item.count;
+      }
+      stats.total += item.count;
+    });
+
+    return res.status(200).json({
+      success: true,
+      properties,
+      statistics: stats,
+      pagination: {
+        currentPage,
+        totalPages: Math.ceil(totalProperties / pageSize),
+        totalProperties,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Get my properties error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load your properties.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Get property for owner/admin editing
@@ -1092,98 +710,50 @@ export const getMyProperties =
    Owner/Admin
 ===================================================== */
 
-export const getManagedPropertyById =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const getManagedPropertyById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        )
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .populate(
-            "reviewedBy",
-
-            "fullName email role"
-          )
-          .populate(
-            "approvalHistory.reviewedBy",
-
-            "fullName email role"
-          );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      if (
-        !canManageProperty(
-          property,
-          req.user
-        )
-      ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-
-            message:
-              "You do not have permission to access this property.",
-          });
-      }
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          property,
-        });
-    } catch (error) {
-      console.error(
-        "Get managed property error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findById(id)
+      .populate("owner", "fullName email phone role")
+      .populate("reviewedBy", "fullName email role")
+      .populate("approvalHistory.reviewedBy", "fullName email role");
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    if (!canManageProperty(property, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to access this property.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      property,
+    });
+  } catch (error) {
+    console.error("Get managed property error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Update property
@@ -1191,323 +761,170 @@ export const getManagedPropertyById =
    Owner/Admin
 ===================================================== */
 
-export const updateProperty =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const updateProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      if (
-        !canManageProperty(
-          property,
-          req.user
-        )
-      ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-
-            message:
-              "You do not have permission to update this property.",
-          });
-      }
-
-      const isAdmin = [
-        "admin",
-        "super_admin",
-      ].includes(req.user.role);
-
-      const editableFields = [
-        "title",
-        "description",
-        "propertyType",
-        "pricePerNight",
-        "originalPrice",
-        "maxGuests",
-        "bedrooms",
-        "bathrooms",
-        "totalRooms",
-        "availableRooms",
-        "checkInTime",
-        "checkOutTime",
-      ];
-
-      editableFields.forEach(
-        (field) => {
-          if (
-            req.body[field] !==
-            undefined
-          ) {
-            property[field] =
-              req.body[field];
-          }
-        }
-      );
-
-      if (
-        req.body.location !==
-        undefined
-      ) {
-        property.location =
-          parseLocation(
-            req.body.location
-          );
-      }
-
-      if (
-        req.body.amenities !==
-        undefined
-      ) {
-        property.amenities =
-          normalizeStringArray(
-            req.body.amenities
-          );
-      }
-
-      if (
-        req.body.rules !==
-        undefined
-      ) {
-        property.rules =
-          normalizeStringArray(
-            req.body.rules
-          );
-      }
-
-      if (
-        req.body.images !==
-        undefined
-      ) {
-        property.images =
-          sanitizeImages(
-            req.body.images
-          );
-      }
-
-      if (
-        property.availableRooms >
-        property.totalRooms
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Available rooms cannot exceed total rooms.",
-          });
-      }
-
-      if (
-        property.originalPrice !==
-          null &&
-        property.originalPrice !==
-          undefined &&
-        property.originalPrice <
-          property.pricePerNight
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Original price cannot be lower than the current price.",
-          });
-      }
-
-      if (isAdmin) {
-        if (
-          req.body.isFeatured !==
-          undefined
-        ) {
-          const newFeaturedStatus =
-            normalizeBoolean(
-              req.body
-                .isFeatured,
-
-              property.isFeatured
-            );
-
-          if (
-            newFeaturedStatus &&
-            property.approvalStatus !==
-              "approved"
-          ) {
-            return res
-              .status(400)
-              .json({
-                success: false,
-
-                message:
-                  "Only approved properties can be featured.",
-              });
-          }
-
-          property.isFeatured =
-            newFeaturedStatus;
-        }
-
-        if (
-          req.body.isActive !==
-          undefined
-        ) {
-          property.isActive =
-            normalizeBoolean(
-              req.body.isActive,
-
-              property.isActive
-            );
-        }
-      } else if (
-        property.approvalStatus ===
-          "approved" ||
-        property.approvalStatus ===
-          "rejected"
-      ) {
-        property.approvalStatus =
-          "pending";
-
-        property.submittedAt =
-          new Date();
-
-        property.reviewedAt =
-          null;
-
-        property.reviewedBy =
-          null;
-
-        property.rejectionReason =
-          "";
-
-        property.approvalNote =
-          "";
-
-        property.isFeatured =
-          false;
-
-        property.approvalHistory.push(
-          {
-            status: "pending",
-
-            note:
-              "Property updated and resubmitted for approval.",
-
-            reviewedBy:
-              null,
-
-            reviewedAt:
-              new Date(),
-          }
-        );
-      }
-
-      await property.save();
-
-      const updatedProperty =
-        await Property.findById(
-          property._id
-        )
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .populate(
-            "reviewedBy",
-
-            "fullName email role"
-          );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message: isAdmin
-            ? "Property updated successfully."
-            : property.approvalStatus ===
-                "pending"
-              ? "Property updated and submitted for approval."
-              : "Property updated successfully.",
-
-          property:
-            updatedProperty,
-        });
-    } catch (error) {
-      console.error(
-        "Update property error:",
-        error
-      );
-
-      if (
-        error.name ===
-        "ValidationError"
-      ) {
-        const validationErrors =
-          Object.values(
-            error.errors
-          ).map(
-            (item) =>
-              item.message
-          );
-
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              validationErrors[0],
-
-            errors:
-              validationErrors,
-          });
-      }
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to update property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    if (!canManageProperty(property, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to update this property.",
+      });
+    }
+
+    const isAdmin = ["admin", "super_admin"].includes(req.user.role);
+
+    const editableFields = [
+      "title",
+      "description",
+      "propertyType",
+      "pricePerNight",
+      "originalPrice",
+      "maxGuests",
+      "bedrooms",
+      "bathrooms",
+      "totalRooms",
+      "availableRooms",
+      "checkInTime",
+      "checkOutTime",
+    ];
+
+    editableFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        property[field] = req.body[field];
+      }
+    });
+
+    if (req.body.location !== undefined) {
+      property.location = parseLocation(req.body.location);
+    }
+
+    if (req.body.amenities !== undefined) {
+      property.amenities = normalizeStringArray(req.body.amenities);
+    }
+
+    if (req.body.rules !== undefined) {
+      property.rules = normalizeStringArray(req.body.rules);
+    }
+
+    if (req.body.images !== undefined) {
+      property.images = sanitizeImages(req.body.images);
+    }
+
+    if (property.availableRooms > property.totalRooms) {
+      return res.status(400).json({
+        success: false,
+        message: "Available rooms cannot exceed total rooms.",
+      });
+    }
+
+    if (
+      property.originalPrice !== null &&
+      property.originalPrice !== undefined &&
+      property.originalPrice < property.pricePerNight
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Original price cannot be lower than the current price.",
+      });
+    }
+
+    if (isAdmin) {
+      if (req.body.isFeatured !== undefined) {
+        const newFeaturedStatus = normalizeBoolean(
+          req.body.isFeatured,
+          property.isFeatured
+        );
+
+        if (newFeaturedStatus && property.approvalStatus !== "approved") {
+          return res.status(400).json({
+            success: false,
+            message: "Only approved properties can be featured.",
+          });
+        }
+
+        property.isFeatured = newFeaturedStatus;
+      }
+
+      if (req.body.isActive !== undefined) {
+        property.isActive = normalizeBoolean(
+          req.body.isActive,
+          property.isActive
+        );
+      }
+    } else if (
+      property.approvalStatus === "approved" ||
+      property.approvalStatus === "rejected"
+    ) {
+      property.approvalStatus = "pending";
+      property.submittedAt = new Date();
+      property.reviewedAt = null;
+      property.reviewedBy = null;
+      property.rejectionReason = "";
+      property.approvalNote = "";
+      property.isFeatured = false;
+
+      property.approvalHistory.push({
+        status: "pending",
+        note: "Property updated and resubmitted for approval.",
+        reviewedBy: null,
+        reviewedAt: new Date(),
+      });
+    }
+
+    await property.save();
+
+    const updatedProperty = await Property.findById(property._id)
+      .populate("owner", "fullName email phone role")
+      .populate("reviewedBy", "fullName email role");
+
+    return res.status(200).json({
+      success: true,
+      message: isAdmin
+        ? "Property updated successfully."
+        : property.approvalStatus === "pending"
+        ? "Property updated and submitted for approval."
+        : "Property updated successfully.",
+      property: updatedProperty,
+    });
+  } catch (error) {
+    console.error("Update property error:", error);
+
+    if (error.name === "ValidationError") {
+      const validationErrors = Object.values(error.errors).map(
+        (item) => item.message
+      );
+
+      return res.status(400).json({
+        success: false,
+        message: validationErrors[0],
+        errors: validationErrors,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Delete property
@@ -1515,86 +932,49 @@ export const updateProperty =
    Owner/Admin
 ===================================================== */
 
-export const deleteProperty =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const deleteProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      if (
-        !canManageProperty(
-          property,
-          req.user
-        )
-      ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-
-            message:
-              "You do not have permission to delete this property.",
-          });
-      }
-
-      await property.deleteOne();
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message:
-            "Property deleted successfully.",
-        });
-    } catch (error) {
-      console.error(
-        "Delete property error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to delete property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    if (!canManageProperty(property, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to delete this property.",
+      });
+    }
+
+    await property.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message: "Property deleted successfully.",
+    });
+  } catch (error) {
+    console.error("Delete property error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to delete property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Toggle property active status
@@ -1602,104 +982,59 @@ export const deleteProperty =
    Owner/Admin
 ===================================================== */
 
-export const togglePropertyActiveStatus =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const togglePropertyActiveStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      if (
-        !canManageProperty(
-          property,
-          req.user
-        )
-      ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-
-            message:
-              "You do not have permission to update this property.",
-          });
-      }
-
-      const requestedStatus =
-        req.body.isActive !==
-        undefined
-          ? normalizeBoolean(
-              req.body
-                .isActive,
-
-              property.isActive
-            )
-          : !property.isActive;
-
-      property.isActive =
-        requestedStatus;
-
-      await property.save();
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message:
-            requestedStatus
-              ? "Property activated successfully."
-              : "Property deactivated successfully.",
-
-          property,
-        });
-    } catch (error) {
-      console.error(
-        "Toggle property status error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to change property availability.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    if (!canManageProperty(property, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to update this property.",
+      });
+    }
+
+    const requestedStatus =
+      req.body.isActive !== undefined
+        ? normalizeBoolean(req.body.isActive, property.isActive)
+        : !property.isActive;
+
+    property.isActive = requestedStatus;
+
+    await property.save();
+
+    return res.status(200).json({
+      success: true,
+      message: requestedStatus
+        ? "Property activated successfully."
+        : "Property deactivated successfully.",
+      property,
+    });
+  } catch (error) {
+    console.error("Toggle property status error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to change property availability.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Admin get all properties
@@ -1707,281 +1042,158 @@ export const togglePropertyActiveStatus =
    Admin
 ===================================================== */
 
-export const getAllPropertiesForAdmin =
-  async (req, res) => {
-    try {
-      const {
-        search = "",
+export const getAllPropertiesForAdmin = async (req, res) => {
+  try {
+    const {
+      search = "",
+      approvalStatus = "all",
+      propertyType = "all",
+      active = "all",
+      featured = "all",
+      owner,
+      page = 1,
+      limit = 20,
+    } = req.query;
 
-        approvalStatus =
-          "all",
+    const filter = {};
 
-        propertyType =
-          "all",
-
-        active = "all",
-
-        featured = "all",
-
-        owner,
-
-        page = 1,
-
-        limit = 20,
-      } = req.query;
-
-      const filter = {};
-
-      if (
-        String(search).trim()
-      ) {
-        filter.$or = [
-          {
-            title: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+    if (String(search).trim()) {
+      filter.$or = [
+        {
+          title: {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            description: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+        },
+        {
+          description: {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.address":
-              {
-                $regex:
-                  String(
-                    search
-                  ).trim(),
-
-                $options: "i",
-              },
+        },
+        {
+          "location.address": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.city": {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+        },
+        {
+          "location.city": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-        ];
-      }
-
-      if (
-        approvalStatus &&
-        approvalStatus !== "all"
-      ) {
-        filter.approvalStatus =
-          approvalStatus;
-      }
-
-      if (
-        propertyType &&
-        propertyType !== "all"
-      ) {
-        filter.propertyType =
-          propertyType;
-      }
-
-      if (
-        active === "true"
-      ) {
-        filter.isActive =
-          true;
-      }
-
-      if (
-        active === "false"
-      ) {
-        filter.isActive =
-          false;
-      }
-
-      if (
-        featured === "true"
-      ) {
-        filter.isFeatured =
-          true;
-      }
-
-      if (
-        featured === "false"
-      ) {
-        filter.isFeatured =
-          false;
-      }
-
-      if (
-        owner &&
-        isValidObjectId(owner)
-      ) {
-        filter.owner = owner;
-      }
-
-      const currentPage =
-        Math.max(
-          Number(page) || 1,
-          1
-        );
-
-      const pageSize =
-        Math.min(
-          Math.max(
-            Number(limit) || 20,
-            1
-          ),
-          100
-        );
-
-      const skip =
-        (currentPage - 1) *
-        pageSize;
-
-      const [
-        properties,
-
-        totalProperties,
-
-        statusCounts,
-
-        activeCount,
-
-        featuredCount,
-      ] = await Promise.all([
-        Property.find(filter)
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .populate(
-            "reviewedBy",
-
-            "fullName email role"
-          )
-          .sort({
-            submittedAt: -1,
-            createdAt: -1,
-          })
-          .skip(skip)
-          .limit(pageSize),
-
-        Property.countDocuments(
-          filter
-        ),
-
-        Property.aggregate([
-          {
-            $group: {
-              _id:
-                "$approvalStatus",
-
-              count: {
-                $sum: 1,
-              },
-            },
-          },
-        ]),
-
-        Property.countDocuments({
-          isActive: true,
-        }),
-
-        Property.countDocuments({
-          isFeatured: true,
-        }),
-      ]);
-
-      const statistics = {
-        total: 0,
-
-        pending: 0,
-
-        approved: 0,
-
-        rejected: 0,
-
-        active: activeCount,
-
-        featured:
-          featuredCount,
-      };
-
-      statusCounts.forEach(
-        (item) => {
-          if (
-            Object.prototype.hasOwnProperty.call(
-              statistics,
-              item._id
-            )
-          ) {
-            statistics[item._id] =
-              item.count;
-          }
-
-          statistics.total +=
-            item.count;
-        }
-      );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          properties,
-
-          statistics,
-
-          pagination: {
-            currentPage,
-
-            totalPages:
-              Math.ceil(
-                totalProperties /
-                  pageSize
-              ),
-
-            totalProperties,
-
-            pageSize,
-          },
-        });
-    } catch (error) {
-      console.error(
-        "Get admin properties error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load admin properties.",
-
-          error:
-            error.message,
-        });
+        },
+      ];
     }
-  };
+
+    if (approvalStatus && approvalStatus !== "all") {
+      filter.approvalStatus = approvalStatus;
+    }
+
+    if (propertyType && propertyType !== "all") {
+      filter.propertyType = propertyType;
+    }
+
+    if (active === "true") {
+      filter.isActive = true;
+    }
+
+    if (active === "false") {
+      filter.isActive = false;
+    }
+
+    if (featured === "true") {
+      filter.isFeatured = true;
+    }
+
+    if (featured === "false") {
+      filter.isFeatured = false;
+    }
+
+    if (owner && isValidObjectId(owner)) {
+      filter.owner = owner;
+    }
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const skip = (currentPage - 1) * pageSize;
+
+    const [
+      properties,
+      totalProperties,
+      statusCounts,
+      activeCount,
+      featuredCount,
+    ] = await Promise.all([
+      Property.find(filter)
+        .populate("owner", "fullName email phone role")
+        .populate("reviewedBy", "fullName email role")
+        .sort({
+          submittedAt: -1,
+          createdAt: -1,
+        })
+        .skip(skip)
+        .limit(pageSize),
+
+      Property.countDocuments(filter),
+
+      Property.aggregate([
+        {
+          $group: {
+            _id: "$approvalStatus",
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+      ]),
+
+      Property.countDocuments({
+        isActive: true,
+      }),
+
+      Property.countDocuments({
+        isFeatured: true,
+      }),
+    ]);
+
+    const statistics = {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      active: activeCount,
+      featured: featuredCount,
+    };
+
+    statusCounts.forEach((item) => {
+      if (Object.prototype.hasOwnProperty.call(statistics, item._id)) {
+        statistics[item._id] = item.count;
+      }
+      statistics.total += item.count;
+    });
+
+    return res.status(200).json({
+      success: true,
+      properties,
+      statistics,
+      pagination: {
+        currentPage,
+        totalPages: Math.ceil(totalProperties / pageSize),
+        totalProperties,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Get admin properties error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load admin properties.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Admin approval queue
@@ -1989,143 +1201,73 @@ export const getAllPropertiesForAdmin =
    Admin
 ===================================================== */
 
-export const getPendingProperties =
-  async (req, res) => {
-    try {
-      const {
-        search = "",
+export const getPendingProperties = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = 20 } = req.query;
 
-        page = 1,
+    const filter = {
+      approvalStatus: "pending",
+    };
 
-        limit = 20,
-      } = req.query;
-
-      const filter = {
-        approvalStatus:
-          "pending",
-      };
-
-      if (
-        String(search).trim()
-      ) {
-        filter.$or = [
-          {
-            title: {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+    if (String(search).trim()) {
+      filter.$or = [
+        {
+          title: {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.city": {
-              $regex:
-                String(
-                  search
-                ).trim(),
-
-              $options: "i",
-            },
+        },
+        {
+          "location.city": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-
-          {
-            "location.district":
-              {
-                $regex:
-                  String(
-                    search
-                  ).trim(),
-
-                $options: "i",
-              },
+        },
+        {
+          "location.district": {
+            $regex: String(search).trim(),
+            $options: "i",
           },
-        ];
-      }
-
-      const currentPage =
-        Math.max(
-          Number(page) || 1,
-          1
-        );
-
-      const pageSize =
-        Math.min(
-          Math.max(
-            Number(limit) || 20,
-            1
-          ),
-          100
-        );
-
-      const skip =
-        (currentPage - 1) *
-        pageSize;
-
-      const [
-        properties,
-
-        totalProperties,
-      ] = await Promise.all([
-        Property.find(filter)
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .sort({
-            submittedAt: 1,
-          })
-          .skip(skip)
-          .limit(pageSize),
-
-        Property.countDocuments(
-          filter
-        ),
-      ]);
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          properties,
-
-          pagination: {
-            currentPage,
-
-            totalPages:
-              Math.ceil(
-                totalProperties /
-                  pageSize
-              ),
-
-            totalProperties,
-
-            pageSize,
-          },
-        });
-    } catch (error) {
-      console.error(
-        "Get pending properties error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to load pending properties.",
-
-          error:
-            error.message,
-        });
+        },
+      ];
     }
-  };
+
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const skip = (currentPage - 1) * pageSize;
+
+    const [properties, totalProperties] = await Promise.all([
+      Property.find(filter)
+        .populate("owner", "fullName email phone role")
+        .sort({
+          submittedAt: 1,
+        })
+        .skip(skip)
+        .limit(pageSize),
+
+      Property.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      properties,
+      pagination: {
+        currentPage,
+        totalPages: Math.ceil(totalProperties / pageSize),
+        totalProperties,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Get pending properties error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load pending properties.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Admin approve property
@@ -2133,145 +1275,72 @@ export const getPendingProperties =
    Admin
 ===================================================== */
 
-export const approveProperty =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const approveProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const note =
+      typeof req.body.note === "string" ? req.body.note.trim() : "";
 
-      const note =
-        typeof req.body.note ===
-        "string"
-          ? req.body.note.trim()
-          : "";
-
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      if (
-        property.approvalStatus ===
-        "approved"
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "This property has already been approved.",
-          });
-      }
-
-      const reviewerId =
-        getUserId(req);
-
-      property.approvalStatus =
-        "approved";
-
-      property.reviewedAt =
-        new Date();
-
-      property.reviewedBy =
-        reviewerId;
-
-      property.approvalNote =
-        note;
-
-      property.rejectionReason =
-        "";
-
-      property.isActive =
-        true;
-
-      property.approvalHistory.push(
-        {
-          status: "approved",
-
-          note:
-            note ||
-            "Property approved by administrator.",
-
-          reviewedBy:
-            reviewerId,
-
-          reviewedAt:
-            new Date(),
-        }
-      );
-
-      await property.save();
-
-      const approvedProperty =
-        await Property.findById(
-          property._id
-        )
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .populate(
-            "reviewedBy",
-
-            "fullName email role"
-          );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message:
-            "Property approved successfully.",
-
-          property:
-            approvedProperty,
-        });
-    } catch (error) {
-      console.error(
-        "Approve property error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to approve property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    if (property.approvalStatus === "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "This property has already been approved.",
+      });
+    }
+
+    const reviewerId = getUserId(req);
+
+    property.approvalStatus = "approved";
+    property.reviewedAt = new Date();
+    property.reviewedBy = reviewerId;
+    property.approvalNote = note;
+    property.rejectionReason = "";
+    property.isActive = true;
+
+    property.approvalHistory.push({
+      status: "approved",
+      note: note || "Property approved by administrator.",
+      reviewedBy: reviewerId,
+      reviewedAt: new Date(),
+    });
+
+    await property.save();
+
+    const approvedProperty = await Property.findById(property._id)
+      .populate("owner", "fullName email phone role")
+      .populate("reviewedBy", "fullName email role");
+
+    return res.status(200).json({
+      success: true,
+      message: "Property approved successfully.",
+      property: approvedProperty,
+    });
+  } catch (error) {
+    console.error("Approve property error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to approve property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Admin reject property
@@ -2279,166 +1348,82 @@ export const approveProperty =
    Admin
 ===================================================== */
 
-export const rejectProperty =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const rejectProperty = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reason =
+      typeof req.body.reason === "string" ? req.body.reason.trim() : "";
+    const note =
+      typeof req.body.note === "string" ? req.body.note.trim() : "";
 
-      const reason =
-        typeof req.body.reason ===
-        "string"
-          ? req.body.reason.trim()
-          : "";
-
-      const note =
-        typeof req.body.note ===
-        "string"
-          ? req.body.note.trim()
-          : "";
-
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      if (!reason) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "A rejection reason is required.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      const reviewerId =
-        getUserId(req);
-
-      property.approvalStatus =
-        "rejected";
-
-      property.reviewedAt =
-        new Date();
-
-      property.reviewedBy =
-        reviewerId;
-
-      property.rejectionReason =
-        reason;
-
-      property.approvalNote =
-        note;
-
-      property.isFeatured =
-        false;
-
-      property.approvalHistory.push(
-        {
-          status: "rejected",
-
-          note: reason,
-
-          reviewedBy:
-            reviewerId,
-
-          reviewedAt:
-            new Date(),
-        }
-      );
-
-      await property.save();
-
-      const rejectedProperty =
-        await Property.findById(
-          property._id
-        )
-          .populate(
-            "owner",
-
-            "fullName email phone role"
-          )
-          .populate(
-            "reviewedBy",
-
-            "fullName email role"
-          );
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message:
-            "Property rejected successfully.",
-
-          property:
-            rejectedProperty,
-        });
-    } catch (error) {
-      console.error(
-        "Reject property error:",
-        error
-      );
-
-      if (
-        error.name ===
-        "ValidationError"
-      ) {
-        const firstError =
-          Object.values(
-            error.errors
-          )[0];
-
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              firstError?.message ||
-              "Property validation failed.",
-          });
-      }
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to reject property.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: "A rejection reason is required.",
+      });
+    }
+
+    const property = await Property.findById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
+
+    const reviewerId = getUserId(req);
+
+    property.approvalStatus = "rejected";
+    property.reviewedAt = new Date();
+    property.reviewedBy = reviewerId;
+    property.rejectionReason = reason;
+    property.approvalNote = note;
+    property.isFeatured = false;
+
+    property.approvalHistory.push({
+      status: "rejected",
+      note: reason,
+      reviewedBy: reviewerId,
+      reviewedAt: new Date(),
+    });
+
+    await property.save();
+
+    const rejectedProperty = await Property.findById(property._id)
+      .populate("owner", "fullName email phone role")
+      .populate("reviewedBy", "fullName email role");
+
+    return res.status(200).json({
+      success: true,
+      message: "Property rejected successfully.",
+      property: rejectedProperty,
+    });
+  } catch (error) {
+    console.error("Reject property error:", error);
+
+    if (error.name === "ValidationError") {
+      const firstError = Object.values(error.errors)[0];
+      return res.status(400).json({
+        success: false,
+        message: firstError?.message || "Property validation failed.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to reject property.",
+      error: error.message,
+    });
+  }
+};
 
 /* =====================================================
    Admin mark/unmark featured
@@ -2446,217 +1431,77 @@ export const rejectProperty =
    Admin
 ===================================================== */
 
-export const updateFeaturedStatus =
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params;
+export const updateFeaturedStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      if (
-        !isValidObjectId(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Invalid property ID.",
-          });
-      }
-
-      const property =
-        await Property.findById(
-          id
-        );
-
-      if (!property) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-
-            message:
-              "Property not found.",
-          });
-      }
-
-      const requestedStatus =
-        req.body.isFeatured !==
-        undefined
-          ? normalizeBoolean(
-              req.body
-                .isFeatured,
-
-              property.isFeatured
-            )
-          : !property.isFeatured;
-
-      if (
-        requestedStatus &&
-        property.approvalStatus !==
-          "approved"
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Only approved properties can be featured.",
-          });
-      }
-
-      property.isFeatured =
-        requestedStatus;
-
-      await property.save();
-
-      return res
-        .status(200)
-        .json({
-          success: true,
-
-          message:
-            property.isFeatured
-              ? "Property added to featured listings."
-              : "Property removed from featured listings.",
-
-          property,
-        });
-    } catch (error) {
-      console.error(
-        "Update featured status error:",
-        error
-      );
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            "Unable to update featured status.",
-
-          error:
-            error.message,
-        });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid property ID.",
+      });
     }
-  };
 
+    const property = await Property.findById(id);
 
-//   export const getOwnerAllProperties = async (req, res) => {
-//   try {
-//     const ownerId = getUserId(req);
+    if (!property) {
+      return res.status(404).json({
+        success: false,
+        message: "Property not found.",
+      });
+    }
 
-//     const {
-//       search,
-//       propertyType,
-//       approvalStatus,
-//       sort = "newest",
-//     } = req.query;
+    const requestedStatus =
+      req.body.isFeatured !== undefined
+        ? normalizeBoolean(req.body.isFeatured, property.isFeatured)
+        : !property.isFeatured;
 
-//     const filter = {
-//       owner: ownerId,
-//     };
+    if (requestedStatus && property.approvalStatus !== "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Only approved properties can be featured.",
+      });
+    }
 
-//     // Search
-//     if (search) {
-//       filter.$or = [
-//         {
-//           title: {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//         {
-//           description: {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//         {
-//           "location.city": {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//         {
-//           "location.address": {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//       ];
-//     }
+    property.isFeatured = requestedStatus;
 
-//     // Property Type
-//     if (propertyType && propertyType !== "All") {
-//       filter.propertyType = propertyType;
-//     }
+    await property.save();
 
-//     // Approval Status
-//     if (approvalStatus && approvalStatus !== "All") {
-//       filter.approvalStatus = approvalStatus;
-//     }
+    return res.status(200).json({
+      success: true,
+      message: property.isFeatured
+        ? "Property added to featured listings."
+        : "Property removed from featured listings.",
+      property,
+    });
+  } catch (error) {
+    console.error("Update featured status error:", error);
 
-//     let sortOption = {};
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update featured status.",
+      error: error.message,
+    });
+  }
+};
 
-//     switch (sort) {
-//       case "price-low":
-//         sortOption = {
-//           pricePerNight: 1,
-//         };
-//         break;
-
-//       case "price-high":
-//         sortOption = {
-//           pricePerNight: -1,
-//         };
-//         break;
-
-//       case "title":
-//         sortOption = {
-//           title: 1,
-//         };
-//         break;
-
-//       case "oldest":
-//         sortOption = {
-//           createdAt: 1,
-//         };
-//         break;
-
-//       default:
-//         sortOption = {
-//           createdAt: -1,
-//         };
-//     }
-
-//     const properties = await Property.find(filter)
-//       .populate(
-//         "owner",
-//         "fullName email phone"
-//       )
-//       .sort(sortOption);
-
-//     return res.status(200).json({
-//       success: true,
-//       total: properties.length,
-//       properties,
-//     });
-//   } catch (error) {
-//     console.error(error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Unable to fetch properties.",
-//     });
-//   }
-// };
+/* =====================================================
+   Get all properties for owner
+   GET /api/properties/owner/all
+   Owner
+===================================================== */
 
 export const getOwnerAllProperties = async (req, res) => {
   try {
+    const ownerId = getUserId(req);
+
+    if (!ownerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
     const {
       search,
       propertyType,
@@ -2664,9 +1509,10 @@ export const getOwnerAllProperties = async (req, res) => {
       sort = "newest",
     } = req.query;
 
-    const filter = {};
+    const filter = {
+      owner: ownerId,
+    };
 
-    // Search
     if (search) {
       filter.$or = [
         {
@@ -2696,12 +1542,10 @@ export const getOwnerAllProperties = async (req, res) => {
       ];
     }
 
-    // Property Type
     if (propertyType && propertyType !== "All") {
       filter.propertyType = propertyType;
     }
 
-    // Approval Status
     if (approvalStatus && approvalStatus !== "All") {
       filter.approvalStatus = approvalStatus;
     }
@@ -2712,26 +1556,21 @@ export const getOwnerAllProperties = async (req, res) => {
       case "price-low":
         sortOption = { pricePerNight: 1 };
         break;
-
       case "price-high":
         sortOption = { pricePerNight: -1 };
         break;
-
       case "rating":
         sortOption = { rating: -1 };
         break;
-
       case "featured":
         sortOption = {
           isFeatured: -1,
           createdAt: -1,
         };
         break;
-
       case "oldest":
         sortOption = { createdAt: 1 };
         break;
-
       default:
         sortOption = { createdAt: -1 };
     }
@@ -2746,7 +1585,7 @@ export const getOwnerAllProperties = async (req, res) => {
       properties,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Get owner all properties error:", error);
 
     return res.status(500).json({
       success: false,
@@ -2754,155 +1593,3 @@ export const getOwnerAllProperties = async (req, res) => {
     });
   }
 };
-//   export const getAllProperties = async (req, res) => {
-//   try {
-//     const {
-//       page = 1,
-//       limit = 12,
-//       search,
-//       propertyType,
-//       city,
-//       minPrice,
-//       maxPrice,
-//       bedrooms,
-//       guests,
-//       amenities,
-//       sort = "newest",
-//     } = req.query;
-
-//     const filter = {
-//       isActive: true,
-//       approvalStatus: "approved",
-//     };
-
-//     // Search
-//     if (search) {
-//       filter.$or = [
-//         {
-//           title: {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//         {
-//           description: {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//         {
-//           "location.address": {
-//             $regex: search,
-//             $options: "i",
-//           },
-//         },
-//       ];
-//     }
-
-//     if (propertyType) {
-//       filter.propertyType = propertyType;
-//     }
-
-//     if (city) {
-//       filter["location.city"] = city;
-//     }
-
-//     if (bedrooms) {
-//       filter.bedrooms = {
-//         $gte: Number(bedrooms),
-//       };
-//     }
-
-//     if (guests) {
-//       filter.maxGuests = {
-//         $gte: Number(guests),
-//       };
-//     }
-
-//     if (minPrice || maxPrice) {
-//       filter.pricePerNight = {};
-
-//       if (minPrice) {
-//         filter.pricePerNight.$gte =
-//           Number(minPrice);
-//       }
-
-//       if (maxPrice) {
-//         filter.pricePerNight.$lte =
-//           Number(maxPrice);
-//       }
-//     }
-
-//     if (amenities) {
-//       filter.amenities = {
-//         $in: amenities.split(","),
-//       };
-//     }
-
-//     let sortOption = {};
-
-//     switch (sort) {
-//       case "price-low":
-//         sortOption = {
-//           pricePerNight: 1,
-//         };
-//         break;
-
-//       case "price-high":
-//         sortOption = {
-//           pricePerNight: -1,
-//         };
-//         break;
-
-//       case "rating":
-//         sortOption = {
-//           rating: -1,
-//         };
-//         break;
-
-//       case "featured":
-//         sortOption = {
-//           isFeatured: -1,
-//           createdAt: -1,
-//         };
-//         break;
-
-//       default:
-//         sortOption = {
-//           createdAt: -1,
-//         };
-//     }
-
-//     const total = await Property.countDocuments(
-//       filter
-//     );
-
-//     const properties =
-//       await Property.find(filter)
-//         .populate(
-//           "owner",
-//           "fullName phone email"
-//         )
-//         .sort(sortOption)
-//         .skip((page - 1) * limit)
-//         .limit(Number(limit));
-
-//     return res.status(200).json({
-//       success: true,
-//       total,
-//       currentPage: Number(page),
-//       totalPages: Math.ceil(
-//         total / limit
-//       ),
-//       properties,
-//     });
-//   } catch (error) {
-//     console.error(error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message:
-//         "Unable to fetch properties.",
-//     });
-//   }
-// };
